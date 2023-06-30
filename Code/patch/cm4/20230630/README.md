@@ -20,7 +20,7 @@ git clone https://github.com/raspberrypi/linux.git
 
 cd linux
 
-wget 
+wget https://raw.githubusercontent.com/clockworkpi/uConsole/master/Code/patch/cm4/20230630/0001-patch-cm4.patch
 
 git reset --hard 3a33f11c48572b9dd0fecac164b3990fc9234da8
 
