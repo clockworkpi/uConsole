@@ -30,6 +30,8 @@ git apply 0001-patch-cm4.patch
 KERNEL=kernel8 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
 KERNEL=kernel8 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
 
+mkdir ./modules
+
 rm -rf ./modules/*
 
 INSTALL_MOD_PATH=./modules make modules_install
