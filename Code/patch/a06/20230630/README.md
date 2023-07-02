@@ -22,8 +22,7 @@ wget https://raw.githubusercontent.com/clockworkpi/uConsole/master/Code/patch/a0
 
 git apply  drivers_network.sh.patch
 
-
-./compile.sh
+./compile.sh  BOARD=clockworkpi-a06 BRANCH=current BUILD_MINIMAL=no BUILD_DESKTOP=no BUILD_ONLY=u-boot,kernel,armbian-config,armbian-zsh,plymouth-theme-armbian,armbian-firmware,armbian-bsp KERNEL_CONFIGURE=no
 
 ```
 
