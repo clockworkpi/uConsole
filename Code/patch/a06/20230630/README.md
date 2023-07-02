@@ -26,4 +26,21 @@ git apply  drivers_network.sh.patch
 
 ```
 
+## debs
+
+Compile.sh will generate the following packages:
+
+```
+output/debs/linux-dtb-current-rockchip64_23.02.0-trunk_arm64.deb
+output/debs/linux-image-current-rockchip64_23.02.0-trunk_arm64.deb
+```
+
+and are not able to be installed on the A06 OS image due to being masked.
+
+The reason for masking these packages is to prevent the A06 kernel from being replaced/updated during the apt upgrade process.
+
+
+
+
+
 
