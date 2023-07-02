@@ -16,9 +16,9 @@ mkdir -p userpatches/kernel/rockchip64-current/
 
 wget drivers_network.sh.patch
 
-wget z-10000_a06_sound_230701.patch
+wget https://raw.githubusercontent.com/clockworkpi/uConsole/master/Code/patch/a06/20230630/z-10000_a06_sound_230701.patch -O userpatches/kernel/rockchip64-current/z-10000_a06_sound_230701.patch
  
-wget z-10000_a06_uc_panel_230701.patch
+wget https://raw.githubusercontent.com/clockworkpi/uConsole/master/Code/patch/a06/20230630/z-10000_a06_uc_panel_230701.patch -O userpatches/kernel/rockchip64-current/z-10000_a06_uc_panel_230701.patch 
 
 git apply  drivers_network.sh.patch
 
