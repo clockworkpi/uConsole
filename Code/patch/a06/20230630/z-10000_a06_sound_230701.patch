@@ -1,0 +1,37 @@
+diff --git a/sound/soc/codecs/es8328.c b/sound/soc/codecs/es8328.c
+index a7ab8dcc7..7518bbeb2 100644
+--- a/sound/soc/codecs/es8328.c
++++ b/sound/soc/codecs/es8328.c
+@@ -253,11 +253,11 @@ static const struct snd_kcontrol_new es8328_snd_controls[] = {
+ 	SOC_DOUBLE_R_TLV("Output 1 Playback Volume",
+ 			ES8328_LOUT1VOL, ES8328_ROUT1VOL,
+ 			0, ES8328_OUT1VOL_MAX, 0, play_tlv),
+-
++/*
+ 	SOC_DOUBLE_R_TLV("Output 2 Playback Volume",
+ 			ES8328_LOUT2VOL, ES8328_ROUT2VOL,
+ 			0, ES8328_OUT2VOL_MAX, 0, play_tlv),
+-
++*/
+ 	SOC_DOUBLE_TLV("Mic PGA Volume", ES8328_ADCCONTROL1,
+ 			4, 0, 8, 0, mic_tlv),
+ };
+@@ -871,6 +871,10 @@ static int es8328_component_probe(struct snd_soc_component *component)
+ 			    ES8328_DACCONTROL17_LD2LO, ES8328_DACCONTROL17_LD2LO);
+         snd_soc_component_update_bits(component, ES8328_DACCONTROL20,
+ 			    ES8328_DACCONTROL20_RD2RO, ES8328_DACCONTROL20_RD2RO);
++        snd_soc_component_update_bits(component, ES8328_LOUT2VOL,
++			    0x3f, 0x1e);
++        snd_soc_component_update_bits(component, ES8328_ROUT2VOL,
++			    0x3f, 0x1e);
+     }
+ 	return 0;
+ 
+@@ -893,6 +897,7 @@ static void es8328_remove(struct snd_soc_component *component)
+ }
+ 
+ const struct regmap_config es8328_regmap_config = {
++	.name = "es8328",
+ 	.reg_bits	= 8,
+ 	.val_bits	= 8,
+ 	.max_register	= ES8328_REG_MAX,
