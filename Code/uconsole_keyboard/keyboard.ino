@@ -192,8 +192,6 @@ void keyboard_task(DEVTERM*dv)
       }
     }
   }
-
-
 }
 
 void keyboard_init(DEVTERM*){

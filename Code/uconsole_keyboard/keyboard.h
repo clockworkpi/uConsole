@@ -50,6 +50,7 @@ enum SKEYS {
   _TRACKBALL_BTN,
   _FN_LOCK_KEYBOARD,
   _FN_LIGHT_KEYBOARD,
+  _FN_SHIFT //FN+SHIFT,ready for more function key
 };
 
 void init_rows();

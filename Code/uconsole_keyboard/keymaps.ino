@@ -96,7 +96,7 @@ const uint16_t keys_maps[][KEYS_NUM] = {
   [FN_LAYER] = {
     _FN_KEY_UP_ARROW, _FN_KEY_DOWN_ARROW, _FN_KEY_LEFT_ARROW, _FN_KEY_RIGHT_ARROW, \
     _JOYSTICK_A, _JOYSTICK_B, _JOYSTICK_X, _JOYSTICK_Y, \
-    _LEFT_SHIFT_KEY, KEY_RIGHT_SHIFT, _LEFT_CTRL_KEY, KEY_RIGHT_CTRL, \
+    _FN_SHIFT, _FN_SHIFT, _LEFT_CTRL_KEY, KEY_RIGHT_CTRL, \
     _CMD_KEY,  _MOUSE_LEFT,  KEY_RIGHT_ALT, _MOUSE_RIGHT,  \
     _TRACKBALL_BTN
   },
@@ -260,10 +260,6 @@ void keyboard_action(DEVTERM*dv, uint8_t row, uint8_t col, uint8_t mode) {
         if (mode == KEY_PRESSED) {
           if (dv->Keyboard_state.sf_on > 0) {
             dv->Consumer->press(HIDConsumer::VOLUME_UP);
-            uint16_t old_sf = dv->Keyboard_state.sf_on;
-            keyboard_release(dv,addr,dv->Keyboard_state.sf_on);
-            dv->Keyboard_state.sf_on = old_sf;
-            dv->Keyboard->press(dv->Keyboard_state.sf_on);
           } else {
             dv->Consumer->press(HIDConsumer::VOLUME_DOWN);
           }
@@ -273,7 +269,11 @@ void keyboard_action(DEVTERM*dv, uint8_t row, uint8_t col, uint8_t mode) {
       } break;
     case _VOLUME_MUTE: {
         if (mode == KEY_PRESSED) {
-          dv->Consumer->press(HIDConsumer::MUTE);
+          if (dv->Keyboard_state.sf_on > 0) {
+            dv->Consumer->press(HIDConsumer::VOLUME_UP);
+          }else{
+            dv->Consumer->press(HIDConsumer::MUTE);
+          }
         } else {
           keyboard_release(dv, addr, k);
         }
@@ -322,9 +322,11 @@ void keyboard_action(DEVTERM*dv, uint8_t row, uint8_t col, uint8_t mode) {
 void keypad_release_core(DEVTERM*dv, uint16_t k) {
 
   switch (k) {
+    case _FN_SHIFT:
+      dv->Keyboard_state.sf_on = 0;
+      break;
     case _LEFT_SHIFT_KEY:
     case KEY_RIGHT_SHIFT:
-      dv->Keyboard_state.sf_on = 0;
       if (dv->Keyboard_state.shift.lock == 0) {
         dv->Keyboard->release(k);
         dv->Keyboard_state.shift.begin = 0;
@@ -475,10 +477,16 @@ void keypad_action(DEVTERM*dv, uint8_t col, uint8_t mode) {
   }
 
   switch (k) {
+    case _FN_SHIFT:
+      if (mode == KEY_PRESSED) {
+        dv->Keyboard_state.sf_on = k;
+      } else {
+        keypad_release(dv, col, k);
+      }
+      break;
     case _LEFT_SHIFT_KEY:
     case KEY_RIGHT_SHIFT:
       if (mode == KEY_PRESSED) {
-        dv->Keyboard_state.sf_on = k;
         if (dv->Keyboard_state.shift.lock == 0) {
           dv->Keyboard->press(k);
           dv->Keyboard_state.shift.begin = k;
