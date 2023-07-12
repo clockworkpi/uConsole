@@ -67,7 +67,7 @@ const uint16_t keyboard_maps[][MATRIX_KEYS] = {
   },
 
   [FN_LAYER] = {
-    _PRINT_KEY, _PAUSE_KEY, _VOLUME_MUTE, '`', '[', ']', KEY_F11, KEY_F12, \
+    _PRINT_KEY, _PAUSE_KEY, _VOLUME_P, '`', '[', ']', KEY_F11, KEY_F12, \
     KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, \
     KEY_F9, KEY_F10, _FN_LOCK_KEYBOARD, KEY_CAPS_LOCK, EMP, EMP, EMP, EMP, \
     'q', 'w', 'e', 'r', 't', 'y', KEY_PAGE_UP, KEY_INSERT, \
@@ -251,29 +251,25 @@ void keyboard_action(DEVTERM*dv, uint8_t row, uint8_t col, uint8_t mode) {
 
     case _VOLUME_P: {
         if (mode == KEY_PRESSED) {
-          dv->Consumer->press(HIDConsumer::VOLUME_UP);
+          if (dv->Keyboard_state.sf_on > 0) {
+            dv->Consumer->press(HIDConsumer::MUTE);
+          } else {
+            dv->Consumer->press(HIDConsumer::VOLUME_UP);
+          }
         } else {
           keyboard_release(dv, addr, k);
         }
       } break;
     case _VOLUME_M: {
         if (mode == KEY_PRESSED) {
-          if (dv->Keyboard_state.sf_on > 0) {
-            dv->Consumer->press(HIDConsumer::VOLUME_UP);
-          } else {
-            dv->Consumer->press(HIDConsumer::VOLUME_DOWN);
-          }
+          dv->Consumer->press(HIDConsumer::VOLUME_DOWN);
         } else {
           keyboard_release(dv, addr, k);
         }
       } break;
     case _VOLUME_MUTE: {
         if (mode == KEY_PRESSED) {
-          if (dv->Keyboard_state.sf_on > 0) {
-            dv->Consumer->press(HIDConsumer::VOLUME_UP);
-          }else{
-            dv->Consumer->press(HIDConsumer::MUTE);
-          }
+          dv->Consumer->press(HIDConsumer::MUTE);
         } else {
           keyboard_release(dv, addr, k);
         }
