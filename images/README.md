@@ -23,7 +23,7 @@ If you want to use the 4G extension, you can find helpful tips on how to use it 
 
 uConsole keyboard firmware flash program available. You can download it from this link: [uConsole Keyboard Firmware Flash Program](https://github.com/clockworkpi/uConsole/raw/master/Bin/uconsole_keyboard_flash.tar.gz).
 
-Here's how you can flash the firmware on uConsole or a PC running Ubuntu 20.04:
+Here's how you can flash the firmware on uConsole or a PC running Ubuntu 22.04:
 
 1. Download the uconsole_keyboard_flash.tar.gz file.
 2. Extract the contents of the archive: `tar zxvf uconsole_keyboard_flash.tar.gz`.
