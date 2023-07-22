@@ -63,6 +63,7 @@ dtoverlay=audremap,pins_12_13
 
 dtparam=spi=on
 gpio=10=ip,np
+dtparam=ant2
 ```
 
 
