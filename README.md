@@ -24,6 +24,7 @@ For flashing the uConsole OS image, you can use the following tools:
 
 If you want to use the 4G extension, you can find helpful tips on how to use it on the [uConsole Wiki](https://github.com/clockworkpi/uConsole/wiki/How-to-use-the-4G-extension).
 
+## uConsole keyboard firmware
 uConsole keyboard firmware flash program available. You can download it from this link: [uConsole Keyboard Firmware Flash Program](https://github.com/clockworkpi/uConsole/raw/master/Bin/uconsole_keyboard_flash.tar.gz).
 
 Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ubuntu 22.04:
