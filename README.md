@@ -52,3 +52,6 @@ Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ub
 [Upgrade 4G extension firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-upgrade-4G-extension-firmware)  
 
 
+## Community
+Please visit our [forum](https://forum.clockworkpi.com/) for more information
+
