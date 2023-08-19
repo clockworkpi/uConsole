@@ -1,5 +1,14 @@
 # uConsole
 
+## Assembly guidelines
+
+* [Assembly guidelines](https://github.com/clockworkpi/uConsole/blob/master/Clockwork_uConsole_Assembly_Guidelines.pdf)  
+
+## Schematic
+
+* [CM4 adapter schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Adapter_CM4_Schematic.pdf)
+* [4G expansion Schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_UC_4G_Schematic.pdf)
+
 ## OS Image
 
 ### CM4 
@@ -41,4 +50,5 @@ Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ub
 ## 4G extension firmware
 
 [Upgrade 4G extension firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-upgrade-4G-extension-firmware)  
+
 
