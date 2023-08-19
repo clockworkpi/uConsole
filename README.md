@@ -38,3 +38,7 @@ Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ub
 7. If any issues occur or the keyboard loses control (which is unlikely), simply reboot uConsole to resolve it.
 8. Rest assured that this flash program will not brick your keyboard.
 
+## 4G extension firmware
+
+[Upgrade 4G extension firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-upgrade-4G-extension-firmware)  
+
