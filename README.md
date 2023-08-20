@@ -1,15 +1,7 @@
 # uConsole
 
-## Assembly guidelines
 
-* [Assembly guidelines](https://github.com/clockworkpi/uConsole/blob/master/Clockwork_uConsole_Assembly_Guidelines.pdf)  
-
-## Schematic
-
-* [CM4 adapter schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Adapter_CM4_Schematic.pdf)
-* [4G expansion Schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_UC_4G_Schematic.pdf)
-
-## OS Image
+## uConsole OS Images
 
 ### CM4 
 * http://dl.clockworkpi.com/uConsole_CM4_v1.3g_64bit.img.7z   
@@ -33,7 +25,7 @@ For flashing the uConsole OS image, you can use the following tools:
 
 If you want to use the 4G extension, you can find helpful tips on how to use it on the [uConsole Wiki](https://github.com/clockworkpi/uConsole/wiki/How-to-use-the-4G-extension).
 
-## uConsole keyboard firmware
+## uConsole Keyboard Firmware
 uConsole keyboard firmware flash program available. You can download it from this link: [uConsole Keyboard Firmware Flash Program](https://github.com/clockworkpi/uConsole/raw/master/Bin/uconsole_keyboard_flash.tar.gz).
 
 Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ubuntu 22.04:
@@ -52,6 +44,17 @@ Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ub
 [Upgrade 4G extension firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-upgrade-4G-extension-firmware)  
 
 
+## Assembly Guidelines
+
+* [Assembly Guidelines](https://github.com/clockworkpi/uConsole/blob/master/Clockwork_uConsole_Assembly_Guidelines.pdf)  
+
+## Schematic
+
+* [CM4 adapter schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Adapter_CM4_Schematic.pdf)
+* [4G expansion Schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_UC_4G_Schematic.pdf)
+
+
 ## Community
-Please visit our [forum](https://forum.clockworkpi.com/) for more information
+Please visit our [Github Wiki](https://github.com/clockworkpi/uConsole/wiki) and https://forum.clockworkpi.com for more information.
+
 
