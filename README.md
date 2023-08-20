@@ -16,12 +16,13 @@ md5sum 56bbb623f41bf6327d408fb415052819
 md5sum 53ca37ccc0333436d06fb5978ac699fd  
 
 
-After downloading the files, you need to uncompress them. Please note that MacOS requires version 11.6 or higher to uncompress 7z files.
+After downloading the files, you will need to extract or decompress them. Please keep in mind that MacOS 11.6 or a higher version is required to extract 7z files.  
+  
+To flash the OS image, you can use the following tools:  
+  
+- For Windows and macOS users, [Etcher](https://etcher.balena.io/) can be used to flash the image.  
+- Linux users can employ the "dd" command to flash the image.  
 
-For flashing the uConsole OS image, you can use the following tools:
-
-* Windows and macOS users can use [Etcher](https://etcher.balena.io/) to flash the image.
-* Linux users can use the "dd" command to flash the image.
 
 If you want to use the 4G extension, you can find helpful tips on how to use it on the [uConsole Wiki](https://github.com/clockworkpi/uConsole/wiki/How-to-use-the-4G-extension).
 
