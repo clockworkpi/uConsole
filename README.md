@@ -57,7 +57,8 @@ Here's how you can flash the firmware on uConsole(A06 or CM4) or a PC running Ub
 
 * [A06 core mainboard v3.14 schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_DevTerm_A06_Core_for_Mainboard_V3.14_Schematic.pdf)
 * [R01 core mainboard v3.14 schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_DevTerm_R01_Core_for_Mainboard_V3.14_Schematic.pdf)
-* [Mainboard v3.14 schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Mainboard_V3.14_Schematic.pdf)
+* [Mainboard v3.14 schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Mainboard_V3.14_Schematic.pdf)  
+* [Mainboard v3.14-V5 schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Mainboard_V3.14_V5_Schematic.pdf)  
 * [CM4 adapter schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_Adapter_CM4_Schematic.pdf)
 * [4G expansion Schematic](https://github.com/clockworkpi/uConsole/blob/master/clockwork_UC_4G_Schematic.pdf)
 
