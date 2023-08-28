@@ -6,7 +6,11 @@
 ### CM4 
 * http://dl.clockworkpi.com/uConsole_CM4_v1.3g_64bit.img.7z   
 md5sum 9dbd07a50967f4015ad9c13795cd71c6
-  
+* http://dl.clockworkpi.com/uConsole_CM4_v0.1b_xfce_64bit.img.7z  (based on [RPI-lite](https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2023-05-03/2023-05-03-raspios-bullseye-armhf-lite.img.xz) with xfce) 
+md5sum a191603d7da0f826d347f1bb8d525687  
+ This version is optimized for immersive writing and comes pre-installed with [Obsidian](https://obsidian.md/).
+
+
 ### A06 
 * http://dl.clockworkpi.com/uConsole_A06_v1.1e.img.7z  
 md5sum 56bbb623f41bf6327d408fb415052819 
