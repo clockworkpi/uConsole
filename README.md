@@ -27,6 +27,7 @@ To flash the OS image, you can use the following tools:
 - For Windows and macOS users, [Etcher](https://etcher.balena.io/) can be used to flash the image.  
 - Linux users can employ the "dd" command to flash the image.  
 
+To learn how to create an image, please refer to our [Wiki](https://github.com/clockworkpi/uConsole/wiki).  
 
 If you want to use the 4G extension, you can find helpful tips on how to use it on the [uConsole Wiki](https://github.com/clockworkpi/uConsole/wiki/How-to-use-the-4G-extension).
 
