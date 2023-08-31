@@ -1,8 +1,8 @@
 ## Get Kernel
 
-Get kernel source from https://open.allwinnertech.com/  
+Get kernel source from https://d1.docs.aw-ol.com/en/study/study_2getsdk/
 
-based on allwinner tina_d1_h_v2.1/lichee/linux-5.4
+based on allwinner D1_Tina_Open/tina_d1_h_v2.1/lichee/linux-5.4
 
 git commit hash: 2c3a14af7536e7a4be9f2b0550f04457ae585be6
 
