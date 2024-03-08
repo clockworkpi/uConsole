@@ -1,0 +1,17 @@
+disable_overscan=1
+dtparam=audio=on
+[pi4]
+max_framebuffers=2
+
+[all]
+ignore_lcd=1
+dtoverlay=dwc2,dr_mode=host
+dtoverlay=vc4-kms-v3d-pi4,cma-384
+dtoverlay=devterm-pmu
+dtoverlay=devterm-panel-uc
+dtoverlay=devterm-misc
+dtoverlay=audremap,pins_12_13
+
+dtparam=spi=on
+gpio=10=ip,np
+dtparam=ant2

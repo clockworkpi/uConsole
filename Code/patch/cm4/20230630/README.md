@@ -1,69 +1,37 @@
-# Patch for uConsole CM4
+# uConsole CM4 kernel sources
+uConsole kernel is based on Raspberry Pi kernel sources:
+`https://github.com/raspberrypi/linux.git`
 
-based on `https://github.com/raspberrypi/linux.git`
-
-commit hash: 3a33f11c48572b9dd0fecac164b3990fc9234da8
-
-## Prepares
-
-ubuntu 22.04 with aarch64-linux-gnu-
-
-```
-sudo apt install -y build-essential gcc-aarch64-linux-gnu 
-```
-
-## Example process of compiling
-
-```
-cd
-git clone https://github.com/raspberrypi/linux.git
-
-cd linux
-
-wget https://raw.githubusercontent.com/clockworkpi/uConsole/master/Code/patch/cm4/20230630/0001-patch-cm4.patch
-
-git reset --hard 3a33f11c48572b9dd0fecac164b3990fc9234da8
-
-git apply 0001-patch-cm4.patch
+The current version is based on top of commit hash:
+`3a33f11c48572b9dd0fecac164b3990fc9234da8`
 
 
-KERNEL=kernel8 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- bcm2711_defconfig
-KERNEL=kernel8 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
+# Build
+Kernel build can be performed on Ubuntu 22.04 with aarch64 cross compilation.
+To automate this process `build-kernel.sh` script has been created.
+It will automatically install all needed dependencies on for kernel building
+both from RPi and Ubuntu guidelines.
 
-mkdir ./modules
+On top of the RPi kernel - uConsole specific patch is applied. It contains
+implementation of all required drivers like video driver for uConsole screen.
 
-rm -rf ./modules/*
+To automate build process on environmend different than Ubuntu 22.04 `run.sh`
+script has been created. It utilizes docker container for building the kernel
+using build script.
 
-INSTALL_MOD_PATH=./modules make modules_install
+Final results are located in `out` directory in the source tree.
 
 
-rm modules/lib/modules/*/build
-rm modules/lib/modules/*/source
+# Deploy
+To deploy build result use content of `out` directory and copy it over
+to the right locations on SD card. More you can find in official RPi guide:
+https://www.raspberrypi.com/documentation/computers/linux_kernel.html
 
-```
 
-## config.txt 
+# Kernel configuration
+In order to use compiled kernel8.img with CM4 in uConsole, we have to setup
+a `config.txt` configuration file. It contains various options which will be
+passed to runtime kernel for proper uConsole specific drivers initialization.
 
-In order to use compiled kernel8.img with CM4 in uConsole ,we have to setup a config.txt
-
-```
-disable_overscan=1
-dtparam=audio=on
-[pi4]
-max_framebuffers=2
-
-[all]
-ignore_lcd=1
-dtoverlay=dwc2,dr_mode=host
-dtoverlay=vc4-kms-v3d-pi4,cma-384
-dtoverlay=devterm-pmu
-dtoverlay=devterm-panel-uc
-dtoverlay=devterm-misc
-dtoverlay=audremap,pins_12_13
-
-dtparam=spi=on
-gpio=10=ip,np
-dtparam=ant2
-```
 
 
