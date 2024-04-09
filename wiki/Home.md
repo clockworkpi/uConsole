@@ -1,1 +1,1 @@
-Welcome to the uConsole wiki! test
+Welcome to the uConsole wiki!
