@@ -59,7 +59,7 @@ sudo chroot .
 ```
 sudo apt update
 #update kernel
-sudo apt install -y uconsole_kernel_cm4-rpi 
+sudo apt install -y uconsole-kernel-cm4-rpi 
 #install additional games/emulators
 sudo apt install -y devterm-tic80-cpi uconsole-love2d retroarch dosbox  devterm-cavestory-cpi-cm4  uconsole-liko12 uconsole-lowresnx uconsole-dosbox-staging pppoe uconsole-4g-util-cm4
 

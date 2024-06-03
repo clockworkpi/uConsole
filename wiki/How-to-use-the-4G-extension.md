@@ -33,8 +33,14 @@ use `mmcli -L` to see if there is a modem like
 ```
 /org/freedesktop/ModemManager1/Modem/0 [QUALCOMM INCORPORATED] SIMCOM_SIM7600G-H
 ```
+if not ,try 
+```
+sudo systemctl restart ModemManager
+``` 
+then  
+use `mmcli -L` to check again, some modems will require ModemManager to restart to see the device 
 
-and if unpack your back shell , you will see a green LED light is flashing on 4G ext
+If unpack your back shell , you also will see a green LED light is flashing on 4G ext once got power on
 
 ### A06 and R01
 
