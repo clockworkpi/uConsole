@@ -24,6 +24,7 @@ enum Axis: uint8_t {
   AXIS_NUM,
 };
 static TrackballMode lastMode;
+static bool asWheel = false;
 static int8_t distances[AXIS_NUM];
 static RateMeter rateMeter[AXIS_NUM];
 static Glider glider[AXIS_NUM];
@@ -39,6 +40,9 @@ static float rateToVelocityCurve(float input) {
 template<Axis AXIS, int8_t Direction >
 static void interrupt( ) {
   distances[AXIS] += Direction;
+  if (asWheel) {
+    return;
+  }
   rateMeter[AXIS].onInterrupt();
   glider[AXIS].setDirection(Direction);
 
@@ -69,7 +73,9 @@ void trackball_task(DEVTERM*dv) {
   noInterrupts();
   //const auto mode = dv->state->moveTrackball();
   //https://forum.clockworkpi.com/t/uconsole-trackball-as-scrolling-wheel-temporary-solution/11032/3
-  const auto mode = dv->Keyboard_state.fn_on == 0 ? TrackballMode::Mouse : TrackballMode::Wheel;
+  //const auto mode = dv->Keyboard_state.fn_on == 0 ? TrackballMode::Mouse : TrackballMode::Wheel;
+  asWheel = dv->Keyboard_state.select_on == 1;
+  const auto mode = asWheel ? TrackballMode::Wheel : TrackballMode::Mouse;
   if (lastMode != mode) {
     rateMeter[AXIS_X].expire();
     rateMeter[AXIS_Y].expire();
