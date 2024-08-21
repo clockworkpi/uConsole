@@ -206,14 +206,18 @@ void keyboard_action(DEVTERM*dv, uint8_t row, uint8_t col, uint8_t mode) {
         k = ' ';
         if (mode == KEY_PRESSED) {
           dv->Keyboard->press(k);
+          dv->Keyboard_state.select_on = 1;
         } else if (mode == KEY_RELEASED) {
           keyboard_release(dv, addr, k);
+          dv->Keyboard_state.select_on = 0;
         }
       } else {
         if (mode == KEY_PRESSED) {
           dv->Joystick->button(9, mode);
+          dv->Keyboard_state.select_on = 1;
         } else {
           keyboard_release(dv, addr, k);
+          dv->Keyboard_state.select_on = 0;
         }
       }
       break;

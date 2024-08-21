@@ -41,6 +41,7 @@ void setup() {
   dev_term.Keyboard_state.layer = 0;
   dev_term.Keyboard_state.prev_layer = 0;
   dev_term.Keyboard_state.fn_on = 0;
+  dev_term.Keyboard_state.select_on = 0;
   dev_term.Keyboard_state.sf_on = 0;
   
   //dev_term.Keyboard_state.shift = 0;

@@ -25,6 +25,7 @@ typedef struct keyboard_state{
   uint8_t layer;
   uint8_t prev_layer;
   uint8_t fn_on;
+  uint8_t select_on;
   uint16_t sf_on;//shift on
   
   uint8_t backlight;//0 1 2 3
