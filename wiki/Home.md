@@ -30,6 +30,9 @@ Instructions for generating OS images for the CM4 module of uConsole.
 * [Kali Linux Image for uConsole CM4](https://github.com/clockworkpi/uConsole/wiki/Kali-linux-image-for-uConsole-cm4)  
 Information on running Kali Linux on the CM4 module of uConsole.
 
+* [Simple uConsole keyboard flashing tool](https://github.com/clockworkpi/uConsole/wiki/Simple-uConsole-keyboard-flashing-tool)
+An automated script to flash the firmware of the uConsole keyboard whether it is plugged in to a uConsole or a linux PC  
+
 
 ## Edit
  
