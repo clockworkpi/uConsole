@@ -42,6 +42,7 @@ Once you’re done, click the "Save Page" button to save your changes.
 
 ### Pull Request  
 
-Just clone https://github.com/clockworkpi/uConsole, and add markdown files to the **_wiki** folder  
+Just clone https://github.com/clockworkpi/uConsole, and add markdown files to the **wiki** folder  
 
-Then Send Pull Request , once got merged, wiki will be shown at https://github.com/clockworkpi/uConsole/wiki
+Then Send Pull Request , once got merged, github workflow will make wiki sync to https://github.com/clockworkpi/uConsole/wiki
+
