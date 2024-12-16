@@ -21,9 +21,10 @@ here is the process:
 3 is TX(PA9)   
 4 is RX(PA10)  
 
-
 ## 1st pin of UART on board
 ![7130803](https://github.com/user-attachments/assets/eeed0c0a-ea86-4496-b931-dcc074835eca)
+
+Do not forget to **also connect GND** (ground) between the fpc 6p connector and the serial-usb converter.
 
 ## Flashing command
 
