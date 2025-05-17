@@ -1,0 +1,1344 @@
+#!/usr/bin/env bash
+
+# 4G Modem Control Script for uConsole CM5
+# Optimized version for CM5 with Bookworm Ubuntu
+
+# --- Configuration ---
+# Logging
+LOG_FILE_BASE="/tmp/uconsole-4g" # Base name for log files (date/time will be appended)
+DEBUG=1                          # Enable debug logging (1=yes, 0=no)
+
+# GPIO Pins - Specific for CM5
+GPIO_CHIP="gpiochip0"
+GPIO_MODEM_POWER=24 # POWER_MCU for CM5
+GPIO_MODEM_RESET=15 # RESET_MCU for CM5
+
+# Modem/Network Settings
+DEFAULT_APNS=("internet" "data") # List of APNs to try for connection
+MODEM_INIT_WAIT_SECONDS=30       # Time (seconds) to wait for modem initialization after power on
+MODEM_DETECT_ATTEMPTS=5          # Number of attempts to detect modem after enabling
+MODEM_DETECT_DELAY_SECONDS=5     # Delay (seconds) between detection attempts
+CONNECT_BEARER_WAIT_SECONDS=10   # Time (seconds) to wait for bearer connection
+DHCLIENT_TIMEOUT_SECONDS=15      # Timeout (seconds) for dhclient
+UDHCPC_TIMEOUT_SECONDS=10        # Timeout (seconds) for udhcpc (if used)
+PING_TARGET="8.8.8.8"            # IP address for connectivity tests
+PING_COUNT=1
+PING_TIMEOUT_SECONDS=5
+
+# Retry Logic Defaults
+RETRY_MAX_ATTEMPTS=3
+RETRY_DELAY_SECONDS=2
+
+# --- Strict Mode & Error Handling ---
+# Exit immediately if a command exits with a non-zero status.
+# Treat unset variables as an error when substituting.
+# Pipelines return the exit status of the last command to exit non-zero.
+set -euo pipefail
+
+# --- Global Variables ---
+# Log file path will be set in main execution flow
+LOG_FILE=""
+SCRIPT_NAME="$(basename "$0")"
+
+# --- Logging Functions ---
+_log() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    # Log to file
+    printf "[%s] [%s] %s\n" "$timestamp" "$level" "$message" >> "$LOG_FILE"
+}
+
+log_info() {
+    echo "[INFO] $1"
+    _log "INFO" "$1"
+}
+
+log_warning() {
+    echo "[WARNING] $1" >&2
+    _log "WARNING" "$1"
+}
+
+log_error() {
+    # Log to stderr and file
+    echo "[ERROR] $1" >&2
+    _log "ERROR" "$1"
+}
+
+log_debug() {
+    # Log debug to stderr if DEBUG=1, similar to log_error
+    if [[ "$DEBUG" -eq 1 ]]; then
+        echo "[DEBUG] $1" >&2
+    fi
+    # Always log debug messages to file regardless of DEBUG setting
+    _log "DEBUG" "$1"
+}
+
+# --- Safe Command Execution & Logging ---
+# Executes a command, logs details, and returns its exit status.
+# Usage: run_command command arg1 arg2 ...
+# Output (stdout and stderr combined) is captured and printed to stdout.
+run_command() {
+    local cmd_str
+    cmd_str=$(printf '%q ' "$@") # Safely quote command and args for logging
+    local output # Combined stdout and stderr
+    local status=0
+
+    log_debug "Executing command: $cmd_str"
+
+    # Execute command, capturing combined stdout and stderr
+    # This avoids subshell scope issues with set -u
+    output=$("$@" 2>&1)
+    status=$?
+
+    # Print combined output to the console
+    if [[ -n "$output" ]]; then
+        echo "$output"
+    fi
+
+    # Log command details
+    log_debug "Command finished with status: $status"
+    _log "CMD" "($status) $cmd_str"
+    if [[ -n "$output" ]]; then
+        # Log combined output
+        _log "OUTPUT/STDERR" "$output"
+    fi
+
+    return $status
+}
+
+# --- Retry Logic ---
+# Retries a command if it fails.
+# Usage: retry_command max_attempts delay_seconds command arg1 arg2 ...
+retry_command() {
+    local max_attempts="$1"
+    local delay="$2"
+    shift 2 # Remove max_attempts and delay from arguments
+    local cmd_str
+    cmd_str=$(printf '%q ' "$@") # Safely quote command and args for logging
+    local attempt=1
+    local status=0
+
+    log_debug "Trying command with retry: $cmd_str (max attempts: $max_attempts, delay: $delay)"
+
+    while [[ $attempt -le $max_attempts ]]; do
+        log_debug "Attempt $attempt/$max_attempts: $cmd_str"
+        # Use run_command to execute and log safely
+        if run_command "$@"; then
+            log_debug "Command succeeded on attempt $attempt"
+            return 0
+        else
+            status=$? # Capture the exit status of the failed command
+            log_error "Command failed on attempt $attempt with status $status"
+            if [[ $attempt -lt $max_attempts ]]; then
+                log_debug "Waiting $delay seconds before retrying..."
+                sleep "$delay"
+            fi
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Command failed after $max_attempts attempts: $cmd_str"
+    return $status # Return the status of the last failed attempt
+}
+
+# --- Helper Functions ---
+
+# Check if essential commands are available
+_check_dependencies() {
+    local missing=0
+    for cmd in "$@"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "$cmd command not found. Please ensure required packages (like gpiod, ModemManager, iproute2) are installed."
+            missing=1
+        fi
+    done
+    return $missing
+}
+
+# Find the first available ModemManager modem index
+_find_modem_index() {
+    local modem_list
+    local modem_index=""
+
+    log_debug "Attempting to find modem index..."
+    # Run mmcli -L safely, suppress stderr on initial check
+    if modem_list=$(mmcli -L 2>/dev/null); then
+        # Extract the exact modem index after "Modem/"
+        modem_index=$(echo "$modem_list" | grep -o "/org/freedesktop/ModemManager1/Modem/[0-9]*" | sed 's/.*Modem\///' || true)
+    fi
+
+    if [[ -z "$modem_index" ]]; then
+        log_debug "No modem found in standard list, trying fallback indices..."
+        for idx in 0 1 2 3; do
+            log_debug "Checking modem index $idx"
+            # Check if modem exists without producing error output if it doesn't
+            if mmcli -m "$idx" --command="" &>/dev/null; then
+                modem_index="$idx"
+                log_info "Found modem at index $modem_index via fallback check."
+                break
+            fi
+        done
+    fi
+
+    if [[ -n "$modem_index" ]]; then
+        log_debug "Found modem index: $modem_index"
+        # Only print the index to stdout for command substitution
+        echo "$modem_index"
+        return 0
+    else
+        log_error "Could not find any modem index."
+        # Ensure nothing is printed to stdout on failure
+        return 1
+    fi
+}
+
+# Find the cellular network interface name (e.g., wwan0, rmnet_data0)
+_find_wwan_interface() {
+    local interface=""
+    log_debug "Detecting network interface..."
+
+    # Prioritize 'wwan' interfaces
+    interface=$(ip link | grep -A 1 'wwan' | grep -o "wwan[0-9]*" | head -1 || true)
+
+    if [[ -z "$interface" ]]; then
+        log_debug "No wwan interface found, trying other common names (rmnet, ppp, usb)..."
+        # Look for interfaces associated with common cellular drivers/protocols
+        interface=$(ip link | grep -E 'rmnet|ppp|usb' | head -1 | awk -F': ' '{print $2}' | awk '{print $1}' || true)
+    fi
+
+    if [[ -n "$interface" ]]; then
+        log_info "Detected network interface: $interface"
+        # Return ONLY the interface name, not the log message
+        echo "$interface"
+        return 0
+    else
+        # Fallback to a default if absolutely necessary, but log a warning
+        log_warning "No specific cellular interface detected, using default 'wwan0'. This might need adjustment."
+        echo "wwan0"
+        return 0 # Return success, but the interface might not be correct
+    fi
+}
+
+# Check SIM lock status for a given modem index
+_check_sim_lock() {
+    local modem_index="$1"
+    local modem_info
+    local lock_status="unlocked" # Assume unlocked unless proven otherwise
+
+    log_debug "Checking SIM lock status for modem $modem_index"
+    if ! modem_info=$(mmcli -m "$modem_index" 2>/dev/null); then
+        log_error "Could not retrieve modem information for index $modem_index to check SIM lock."
+        # Can't determine status, assume unlocked but log error
+        return 0
+    fi
+
+    # Extract and log unlock retries information regardless of lock status
+    local retries
+    retries=$(echo "$modem_info" | grep "unlock retries" || echo "Unlock retries: Unknown")
+    
+    # Be more specific in checking for sim-pin (PIN1) lock
+    # Only match exact "lock: sim-pin" pattern, not sim-pin2
+    if echo "$modem_info" | grep -qE "lock: sim-pin([^2]|$)"; then
+        lock_status="locked"
+        log_error "SIM card is locked (pin). $retries"
+        log_error "Critical SIM lock detected: sim-pin. Connection may fail."
+        return 1 # Return locked status for PIN1
+    elif echo "$modem_info" | grep -q "lock: sim-pin2"; then
+        lock_status="locked"
+        log_error "SIM card is locked (pin2). $retries"
+        log_info "Non-critical SIM lock detected: sim-pin2. Attempting to connect anyway."
+        # Logged the error, but return success (0) so connect can proceed
+        return 0
+    else
+        log_debug "SIM card appears to be unlocked. $retries"
+        return 0 # Indicates unlocked
+    fi
+}
+
+# Check if ModemManager service is running, optionally restart it
+_ensure_modemmanager_active() {
+    log_debug "Checking ModemManager service status..."
+    if systemctl is-active --quiet ModemManager; then
+        log_debug "ModemManager service is active."
+        return 0
+    else
+        log_error "ModemManager service is not active."
+        log_info "Attempting to restart ModemManager service..."
+        if retry_command "$RETRY_MAX_ATTEMPTS" "$RETRY_DELAY_SECONDS" systemctl restart ModemManager; then
+            log_info "ModemManager restarted successfully."
+            log_debug "Waiting a few seconds for service to stabilize..."
+            sleep 3
+            return 0
+        else
+            log_error "Failed to restart ModemManager service."
+            return 1
+        fi
+    fi
+}
+
+# Helper function to clean interface names (remove log messages, newlines)
+_clean_interface_name() {
+    local dirty_interface="$1"
+    # Extract just the interface name (wwan0, etc) by removing any log messages and newlines
+    echo "$dirty_interface" | grep -o "[a-zA-Z0-9_]*[0-9]" | head -1 | tr -d '\n'
+}
+
+# --- Core Functions ---
+
+function show_help {
+    echo "uConsole 4G Modem Manager for CM5"
+    echo "==============================="
+    printf "Usage: %s [COMMAND]\n" "$SCRIPT_NAME"
+    echo ""
+    echo "Commands:"
+    echo "  status      - Check the current 4G modem status"
+    echo "  enable      - Power on the 4G module"
+    echo "  disable     - Power off the 4G module"
+    echo "  connect     - Connect to the internet using the 4G modem"
+    echo "  disconnect  - Disconnect from the internet"
+    echo "  unlock      - Unlock SIM card with PIN code"
+    echo "  diagnose    - Run comprehensive modem diagnostics"
+    echo "  reset       - Perform a full disconnect, disable, enable, connect cycle"
+    echo "  help        - Show this help message"
+    echo ""
+    printf "Log file: %s-<timestamp>.log\n" "$LOG_FILE_BASE"
+    echo ""
+}
+
+function check_modem_status {
+    log_info "Checking 4G modem status..."
+    local modem_index
+    local interface
+    local modem_info
+    local ip_address
+    local signal
+
+    if ! _ensure_modemmanager_active; then
+        return 1
+    fi
+
+    modem_index=$(_find_modem_index) || return 1
+    log_info "Using modem index: $modem_index"
+
+    # Get modem info once
+    if ! modem_info=$(mmcli -m "$modem_index" 2>/dev/null); then
+        log_error "Could not retrieve modem information for index $modem_index."
+        # Attempt restart as a potential fix
+        log_info "Attempting to restart ModemManager service..."
+        if systemctl restart ModemManager &>/dev/null; then
+            sleep 5
+            modem_info=$(mmcli -m "$modem_index" 2>/dev/null) || true
+        fi
+        if [[ -z "$modem_info" ]]; then
+             log_error "Still unable to retrieve modem info after restart attempt."
+             return 1
+        fi
+    fi
+
+    # Check SIM Lock
+    if ! _check_sim_lock "$modem_index"; then
+        log_info "SIM is locked. Use '$SCRIPT_NAME unlock' to unlock."
+        # Continue checking other statuses
+    else
+        log_info "SIM status: Unlocked or N/A"
+    fi
+
+    # Check Modem Power/Enable State
+    if echo "$modem_info" | grep -q "state: 'registered'"; then
+        log_info "Modem state: Registered with network"
+    elif echo "$modem_info" | grep -q "state: 'connected'"; then
+        log_info "Modem state: Connected to network"
+    elif echo "$modem_info" | grep -q "state: 'enabled'"; then
+        log_info "Modem state: Enabled"
+    elif echo "$modem_info" | grep -q "state: 'disabled'"; then
+        log_info "Modem state: Disabled. Use '$SCRIPT_NAME enable' to enable."
+    else
+        # Try to extract the state from the modem info
+        log_info "Modem state: $(echo "$modem_info" | grep "state:" | head -1 | sed 's/.*state: //' || echo "Unknown")"
+    fi
+
+    # Check Network Connection Status
+    interface=$(_find_wwan_interface) || interface="wwan0" # Use default if detection fails
+    # Clean the interface name properly
+    interface=$(_clean_interface_name "$interface")
+    log_info "Using network interface: $interface"
+
+    # Check IP address
+    ip_address=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}' || true)
+    if [[ -n "$ip_address" ]]; then
+        log_info "✓ Connected to network"
+        log_info "  Interface: $interface"
+        log_info "  IP address: $ip_address"
+    # Check ModemManager bearer status as fallback
+    elif echo "$modem_info" | grep -q "bearer path"; then
+        log_info "✓ Connected to network (Bearer active in ModemManager)"
+        log_info "  Interface: $interface (IP address not found via 'ip addr')"
+    else
+        log_info "✗ Not connected to network"
+    fi
+
+    # Get Signal Quality
+    signal=$(echo "$modem_info" | grep "signal quality" | sed 's/.*signal quality: \([0-9]*\)%.*/\1/g' || true)
+    if [[ -n "$signal" ]]; then
+        log_info "Signal quality: $signal%"
+    else
+        log_info "Signal quality: Not available"
+    fi
+
+    return 0
+}
+
+function enable_4g {
+    log_info "Powering on the 4G module on CM5..."
+    if ! _check_dependencies gpioset mmcli systemctl; then return 1; fi
+
+    # Check if already enabled first, before stopping MM
+    local modem_index
+    if modem_index=$(_find_modem_index 2>/dev/null); then
+        if mmcli -m "$modem_index" 2>/dev/null | grep -q -E "state: 'enabled'|state: registered|state: connected"; then
+            log_info "Modem is already enabled/active."
+            return 0
+        fi
+    fi
+
+    # Stop ModemManager temporarily to release GPIO control
+    log_info "Stopping ModemManager temporarily..."
+    run_command systemctl stop ModemManager
+
+    log_debug "Current GPIO state before enabling:"
+    run_command gpioinfo "$GPIO_CHIP" | grep -E "line ${GPIO_MODEM_POWER}:|line ${GPIO_MODEM_RESET}:" || true
+
+    # CM5-specific GPIO sequence based on successful patterns from tests
+    log_info "Applying CM5-specific GPIO sequence for power on..."
+    
+    # Set power pin high first
+    log_debug "Setting POWER pin (GPIO ${GPIO_MODEM_POWER}) high"
+    if ! run_command gpioset "$GPIO_CHIP" "${GPIO_MODEM_POWER}=1"; then
+         log_error "Failed to set POWER pin high."
+         return 1
+    fi
+    
+    # Set reset pin high
+    log_debug "Setting RESET pin (GPIO ${GPIO_MODEM_RESET}) high"
+    if ! run_command gpioset "$GPIO_CHIP" "${GPIO_MODEM_RESET}=1"; then
+         log_error "Failed to set RESET pin high."
+         return 1
+    fi
+    
+    # Allow time for GPIO state to stabilize
+    sleep 5
+    
+    # Pull reset low to toggle the modem 
+    log_debug "Setting RESET pin low (active) to reset modem"
+    if ! run_command gpioset "$GPIO_CHIP" "${GPIO_MODEM_RESET}=0"; then
+         log_error "Failed to set RESET pin low."
+         return 1
+    fi
+
+    log_info "Waiting for the modem to initialize..."
+    sleep 13
+
+    log_debug "Current GPIO state after enabling sequence:"
+    run_command gpioinfo "$GPIO_CHIP" | grep -E "line ${GPIO_MODEM_POWER}:|line ${GPIO_MODEM_RESET}:" || true
+
+    # Wait for USB enumeration before restarting ModemManager
+    log_debug "Waiting 3 seconds for USB enumeration..."
+    sleep 3
+    
+    # Restart ModemManager
+    log_info "Restarting ModemManager..."
+    if ! run_command systemctl start ModemManager; then
+         log_error "Failed to restart ModemManager after GPIO sequence!"
+         return 1
+    fi
+    log_debug "ModemManager started. Waiting for it to initialize..."
+    sleep 5 # Give MM time to start up
+
+    log_info "Waiting for the modem to be detected..."
+    local attempt
+    for attempt in $(seq 1 "$MODEM_DETECT_ATTEMPTS"); do
+        if _find_modem_index &>/dev/null; then
+            log_info "✓ 4G modem successfully detected/enabled on attempt $attempt."
+            run_command mmcli -L
+            return 0
+        else
+            if [[ $attempt -lt $MODEM_DETECT_ATTEMPTS ]]; then
+                log_info "Modem not detected yet, waiting $MODEM_DETECT_DELAY_SECONDS seconds (attempt $attempt/$MODEM_DETECT_ATTEMPTS)..."
+                sleep "$MODEM_DETECT_DELAY_SECONDS"
+            fi
+        fi
+    done
+
+    log_error "✗ 4G modem not detected after enabling sequence and retries."
+    log_debug "Final attempt to detect modems:"
+    run_command mmcli -L || true
+    log_debug "USB devices:"
+    run_command lsusb || true
+    return 1
+}
+
+function disable_4g {
+    log_info "Powering off the 4G module..."
+    if ! _check_dependencies gpioset mmcli systemctl; then return 1; fi
+
+    local modem_index
+    local modem_info
+
+    # Try to find modem to disconnect first
+    if modem_index=$(_find_modem_index 2>/dev/null); then
+        log_debug "Found modem index: $modem_index"
+        if modem_info=$(mmcli -m "$modem_index" 2>/dev/null); then
+            # Check if connected and try to disconnect
+            if echo "$modem_info" | grep -q "bearer path"; then
+                log_info "Disconnecting active connection before power off..."
+                run_command mmcli -m "$modem_index" --simple-disconnect || true
+            else
+                log_debug "Modem found but no active connection detected."
+            fi
+        else
+            log_debug "Could not get modem info for index $modem_index, skipping disconnect attempt."
+        fi
+    else
+        log_debug "No modem detected, skipping disconnect attempt."
+    fi
+
+    # Stop ModemManager temporarily before GPIO manipulation
+    log_info "Stopping ModemManager temporarily..."
+    run_command systemctl stop ModemManager
+
+    log_debug "Current GPIO state before disabling:"
+    run_command gpioinfo "$GPIO_CHIP" | grep -E "line ${GPIO_MODEM_POWER}:|line ${GPIO_MODEM_RESET}:" || true
+
+    # CM5-specific GPIO sequence for power off
+    log_info "Applying CM5-specific GPIO sequence for power off..."
+    
+    # Toggle power pin (set low, then high after delay)
+    log_debug "Setting POWER pin low for power off"
+    if ! run_command gpioset "$GPIO_CHIP" "${GPIO_MODEM_POWER}=0"; then
+         log_error "Failed to set POWER pin low."
+         # Continue anyway to try complete power off
+    fi
+    
+    sleep 3
+    
+    log_debug "Setting POWER pin high to complete power cycle"
+    if ! run_command gpioset "$GPIO_CHIP" "${GPIO_MODEM_POWER}=1"; then
+         log_error "Failed to set POWER pin high."
+         # Continue anyway
+    fi
+
+    log_debug "Current GPIO state after disabling sequence:"
+    run_command gpioinfo "$GPIO_CHIP" | grep -E "line ${GPIO_MODEM_POWER}:|line ${GPIO_MODEM_RESET}:" || true
+
+    # Ensure ModemManager remains stopped after power-off sequence
+    log_info "Ensuring ModemManager is stopped..."
+    run_command systemctl is-active --quiet ModemManager && run_command systemctl stop ModemManager
+
+    log_info "Waiting 10 seconds for modem to fully power down..."
+    sleep 10
+
+    # Verify modem is no longer detected
+    log_info "Verifying modem is powered off..."
+    if mmcli -L &>/dev/null; then
+        if _find_modem_index &>/dev/null; then
+            log_error "✗ Modem still detected after disable sequence. Power off may have failed."
+            run_command mmcli -L || true
+            return 1
+        fi
+    fi
+
+    log_info "✓ 4G module appears powered off successfully."
+    return 0
+}
+
+function unlock_sim {
+    log_info "Attempting to unlock SIM card..."
+    if ! _check_dependencies mmcli; then return 1; fi
+    if ! _ensure_modemmanager_active; then return 1; fi
+
+    local modem_index
+    modem_index=$(_find_modem_index) || return 1
+    log_info "Using modem index: $modem_index"
+
+    local modem_info
+    if ! modem_info=$(mmcli -m "$modem_index" 2>/dev/null); then
+        log_error "Could not retrieve modem information for index $modem_index."
+        return 1
+    fi
+
+    local lock_type=""
+    if echo "$modem_info" | grep -q "lock: sim-pin2"; then
+        lock_type="pin2"
+    elif echo "$modem_info" | grep -q "lock: sim-pin"; then
+        lock_type="pin"
+    fi
+
+    if [[ -z "$lock_type" ]]; then
+        log_info "✓ SIM card is already unlocked or does not require a PIN."
+        return 0
+    fi
+
+    local retries
+    retries=$(echo "$modem_info" | grep "unlock retries" || echo "Unlock retries: Unknown")
+    log_info "SIM card is locked ($lock_type). $retries"
+
+    local pin_code
+    # Prompt for PIN using read -s for security
+    read -sp "Enter SIM $lock_type code: " pin_code
+    echo # Add a newline after the prompt
+
+    if [[ -z "$pin_code" ]]; then
+        log_error "No PIN provided. Cannot unlock SIM."
+        return 1
+    fi
+
+    log_info "Attempting to unlock with provided $lock_type..."
+    local unlock_cmd
+    if [[ "$lock_type" == "pin2" ]]; then
+        # For PIN2, we need to specify an action (enable/disable/verify)
+        # Since we just want to verify/unlock, we'll use --verify-pin2
+        unlock_cmd=(mmcli -m "$modem_index" "--verify-pin2=$pin_code")
+    else
+        # For regular PIN1
+        unlock_cmd=(mmcli -m "$modem_index" "--pin=$pin_code")
+    fi
+
+    # Use run_command to attempt unlock and log output/errors
+    if run_command "${unlock_cmd[@]}"; then
+        # Verify unlock status
+        sleep 2 # Give modem time to update state
+        if ! mmcli -m "$modem_index" 2>/dev/null | grep -q "lock: sim-pin[2]*"; then
+            log_info "✓ SIM card successfully unlocked."
+            # Check if modem needs re-enabling
+            if ! mmcli -m "$modem_index" 2>/dev/null | grep -q -E "state: 'enabled'|state: registered|state: connected"; then
+                 log_info "Modem is disabled, attempting to re-enable..."
+                 run_command mmcli -m "$modem_index" --enable || log_error "Failed to re-enable modem after unlock."
+                 sleep 2
+            fi
+            return 0
+        else
+            log_error "✗ Unlock command succeeded, but modem still reports locked status."
+            return 1
+        fi
+    else
+        log_error "✗ Failed to unlock SIM card. Please check your PIN code."
+        # Display updated unlock retries if possible
+        modem_info=$(mmcli -m "$modem_index" 2>/dev/null) || true
+        retries=$(echo "$modem_info" | grep "unlock retries" || echo "Unlock retries: Unknown")
+        log_info "Updated unlock attempts remaining: $retries"
+        return 1
+    fi
+}
+
+function connect_4g {
+    log_info "Connecting to the internet using 4G..."
+    if ! _check_dependencies mmcli ip dhclient ping; then return 1; fi
+    if ! _ensure_modemmanager_active; then return 1; fi
+
+    local modem_index
+    local interface
+
+    # 1. Ensure modem is enabled
+    log_info "Step 1: Ensuring modem is enabled..."
+    if ! mmcli -L &>/dev/null || ! _find_modem_index &>/dev/null; then
+        log_info "Modem not detected. Attempting to enable..."
+        if ! enable_4g; then
+            log_error "Failed to enable modem. Cannot proceed with connection."
+            return 1
+        fi
+        # Wait a bit longer after explicit enable
+        log_info "Waiting 10 seconds for modem to be fully ready after enabling..."
+        sleep 10
+    fi
+
+    modem_index=$(_find_modem_index) || return 1
+    log_info "Using modem index: $modem_index"
+
+    # Re-check if enabled after potential enable_4g call
+    if ! mmcli -m "$modem_index" 2>/dev/null | grep -q -E "state: 'enabled'|state: registered|state: connected"; then
+        log_info "Modem is detected but disabled. Attempting to enable..."
+        if ! run_command mmcli -m "$modem_index" --enable; then
+             log_error "Failed to enable modem $modem_index."
+             return 1
+        fi
+        log_info "Waiting 5 seconds after enabling..."
+        sleep 5
+    fi
+
+    # 2. Check SIM Lock
+    log_info "Step 2: Checking SIM lock status..."
+    local sim_lock_result
+    _check_sim_lock "$modem_index"
+    sim_lock_result=$?
+    
+    if [[ $sim_lock_result -eq 1 ]]; then
+        log_error "SIM card is locked. Please unlock using '$SCRIPT_NAME unlock' before connecting."
+        return 1 # Hard fail only for SIM PIN1 lock
+    fi
+    log_info "SIM status: OK (PIN1 unlocked or no PIN required)"
+
+    # 3. Check if already connected
+    log_info "Step 3: Checking existing connection..."
+    interface=$(_find_wwan_interface) || interface="wwan0" # Use default if detection fails
+    # Clean the interface name to ensure it's just the name, no logs or newlines
+    interface=$(_clean_interface_name "$interface")
+    log_info "Using network interface: $interface"
+
+    if ip addr show "$interface" 2>/dev/null | grep -q "inet "; then
+        local current_ip
+        current_ip=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}')
+        log_info "✓ Already connected to the internet."
+        log_info "  Interface: $interface"
+        log_info "  IP address: $current_ip"
+        # Optionally verify with ping
+        log_info "Verifying connectivity..."
+        if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+             log_info "✓ Connectivity test successful."
+             return 0
+        else
+             log_warning "✗ Already have IP, but ping test failed. Proceeding to reconnect..."
+             # Fall through to attempt reconnection
+        fi
+    else
+        log_info "Not currently connected via IP address."
+    fi
+
+    # 4. Create Bearer Connection
+    log_info "Step 4: Creating connection bearer..."
+    local apn_connected=0
+    local apn
+    # Try configured APNs first
+    for apn in "${DEFAULT_APNS[@]}"; do
+        log_info "Attempting connection with APN '$apn'..."
+        if run_command mmcli -m "$modem_index" --simple-connect="apn=$apn"; then
+            apn_connected=1
+            log_info "✓ Bearer connection initiated with APN '$apn'."
+            break
+        else
+            log_warning "APN '$apn' failed. Trying next..."
+        fi
+    done
+
+    # Try default APN if others failed
+    if [[ $apn_connected -eq 0 ]]; then
+        log_info "Attempting connection with default APN..."
+        if run_command mmcli -m "$modem_index" --simple-connect; then
+            apn_connected=1
+            log_info "✓ Bearer connection initiated with default APN."
+        else
+            log_error "✗ All APN connection attempts failed."
+            # Check modem state for clues
+            run_command mmcli -m "$modem_index" || true
+            return 1
+        fi
+    fi
+
+    # Wait for bearer to be fully connected
+    log_info "Waiting up to $CONNECT_BEARER_WAIT_SECONDS seconds for bearer connection..."
+    local connected_state=0
+    for i in $(seq 1 "$CONNECT_BEARER_WAIT_SECONDS"); do
+        printf "\rWaiting for connection... %2d/%d" "$i" "$CONNECT_BEARER_WAIT_SECONDS"
+        
+        # Check multiple state indicators that could indicate connection
+        if mmcli -m "$modem_index" 2>/dev/null | grep -q -E "state: connected|packet service state: attached|initial bearer"; then
+            connected_state=1
+            echo # Newline
+            log_info "✓ Bearer connection detected."
+            break
+        fi
+        sleep 1
+    done
+    
+    # Don't fail just because we can't detect the state correctly
+    # Let's check for a bearer path directly instead
+    if [[ $connected_state -eq 0 ]]; then
+        echo # Newline
+        log_warning "Didn't detect 'connected' state in time window, but continuing anyway..."
+        local bearer_info
+        if bearer_info=$(run_command mmcli -m "$modem_index" --bearer 2>&1) &&
+           echo "$bearer_info" | grep -q "Bearer"; then
+            log_info "✓ Bearer exists, proceeding with connection"
+            connected_state=1
+        else
+            run_command mmcli -m "$modem_index" --list-bearers || true
+            bearer_index=$(mmcli -m "$modem_index" --list-bearers 2>/dev/null | grep -o "/org/freedesktop/ModemManager1/Bearer/[0-9]*" | grep -o "[0-9]*" | head -1 || true)
+            if [[ -n "$bearer_index" ]]; then
+                log_info "✓ Found bearer $bearer_index, proceeding with connection"
+                connected_state=1
+            else
+                log_error "✗ No bearer found after connecting. Connection appears to have failed."
+                run_command mmcli -m "$modem_index" || true # Show final state
+                return 1
+            fi
+        fi
+    fi
+
+    # 5. Configure Network Interface
+    log_info "Step 5: Configuring network interface $interface..."
+
+    # Double check interface is clean using our helper function
+    interface=$(_clean_interface_name "$interface")
+
+    # Ensure interface exists and is up
+    log_debug "Ensuring interface $interface is up..."
+    if ! retry_command "$RETRY_MAX_ATTEMPTS" "$RETRY_DELAY_SECONDS" ip link set "$interface" up; then
+        log_error "Could not bring interface $interface up. Network configuration might fail."
+        # Attempt to continue, DHCP might still work
+    else
+        log_debug "Interface $interface is up."
+    fi
+    sleep 1 # Short delay after bringing interface up
+
+    # Flush any old IP addresses
+    log_debug "Flushing existing IP addresses from $interface..."
+    run_command ip addr flush dev "$interface" || log_warning "Failed to flush IP addresses (maybe interface was down)."
+
+    # For QMI modems in raw-IP mode, DHCP clients often fail because they expect an Ethernet device
+    # Instead, we should use the IP information from the ModemManager bearer directly
+    log_info "Configuring network using IP information from ModemManager bearer..."
+    
+    # Find active bearer - we need to search more thoroughly
+    local bearer_index
+    local bearer_info
+    local found_bearer=0
+    
+    # First method: Check the modem's list-bearers
+    log_debug "Searching for active bearers using mmcli -m $modem_index --list-bearers"
+    if bearer_index=$(mmcli -m "$modem_index" --list-bearers 2>/dev/null | grep -o "/org/freedesktop/ModemManager1/Bearer/[0-9]*" | grep -o "[0-9]*" | head -1); then
+        log_info "Found bearer $bearer_index from list-bearers"
+        if bearer_info=$(mmcli -b "$bearer_index" 2>/dev/null) && [[ -n "$bearer_info" ]]; then
+            log_info "Using bearer $bearer_index to extract IP configuration"
+            found_bearer=1
+        fi
+    fi
+    
+    # Second method: Check for initial bearer in modem info
+    if [[ $found_bearer -eq 0 ]]; then
+        log_debug "Searching for initial bearer in modem info"
+        local modem_info
+        modem_info=$(mmcli -m "$modem_index" 2>/dev/null)
+        bearer_index=$(echo "$modem_info" | grep "initial bearer path" | grep -o "/org/freedesktop/ModemManager1/Bearer/[0-9]*" | grep -o "[0-9]*" | head -1 || true)
+        
+        if [[ -n "$bearer_index" ]]; then
+            log_info "Found initial bearer $bearer_index from modem info"
+            if bearer_info=$(mmcli -b "$bearer_index" 2>/dev/null) && [[ -n "$bearer_info" ]]; then
+                log_info "Using bearer $bearer_index to extract IP configuration"
+                found_bearer=1
+            fi
+        fi
+    fi
+    
+    # Third method: Try to directly check some common bearer indexes
+    if [[ $found_bearer -eq 0 ]]; then
+        log_debug "Trying common bearer indexes directly"
+        for idx in 1 2 3 0; do
+            if bearer_info=$(mmcli -b "$idx" 2>/dev/null) && [[ -n "$bearer_info" ]]; then
+                log_info "Found active bearer with index $idx by direct check"
+                bearer_index=$idx
+                found_bearer=1
+                break
+            fi
+        done
+    fi
+    
+    # If we still haven't found a bearer, try one more approach from the logs
+    if [[ $found_bearer -eq 0 ]]; then
+        log_debug "Checking recent ModemManager logs for bearer information"
+        local mm_logs
+        mm_logs=$(journalctl -u ModemManager -n 100 2>/dev/null)
+        
+        # Look for IP information in logs
+        if [[ -n "$mm_logs" ]]; then
+            local ip_addr
+            local ip_gw
+            local ip_dns1
+            local ip_dns2
+            
+            if ip_addr=$(echo "$mm_logs" | grep -A10 "QMI IPv4 Settings" | grep "address:" | tail -1 | awk '{print $3}' | sed 's/\/.*//g' || true) && [[ -n "$ip_addr" ]]; then
+                log_info "Found IP address $ip_addr directly from ModemManager logs"
+                # Try to find prefix, gateway, dns from logs too
+                local ip_prefix
+                ip_prefix=$(echo "$mm_logs" | grep -A10 "QMI IPv4 Settings" | grep "address:" | tail -1 | awk '{print $3}' | grep -o "/.*" | tr -d "/" || echo "30")
+                ip_gw=$(echo "$mm_logs" | grep -A10 "QMI IPv4 Settings" | grep "gateway:" | tail -1 | awk '{print $3}' || true)
+                ip_dns1=$(echo "$mm_logs" | grep -A10 "QMI IPv4 Settings" | grep "DNS #1:" | tail -1 | awk '{print $3}' || true)
+                ip_dns2=$(echo "$mm_logs" | grep -A10 "QMI IPv4 Settings" | grep "DNS #2:" | tail -1 | awk '{print $3}' || true)
+                
+                # Return early with this information - create a stub bearer_info
+                bearer_info="address: $ip_addr/$ip_prefix\ngateway: $ip_gw\nDNS #1: $ip_dns1\nDNS #2: $ip_dns2"
+                found_bearer=1
+            fi
+        fi
+    fi
+    
+    if [[ $found_bearer -eq 0 ]]; then
+        # Fall back to trying DHCP as a last resort
+        log_info "No bearer IP information found. Falling back to DHCP method..."
+        
+        # Try udhcpc first (better for raw-IP interfaces)
+        if command -v udhcpc &>/dev/null; then
+            log_info "Trying udhcpc DHCP client (timeout ${UDHCPC_TIMEOUT_SECONDS}s)..."
+            run_command ip link set "$interface" up || true
+            if timeout "$UDHCPC_TIMEOUT_SECONDS" udhcpc -i "$interface" -t 5 -T 3 -n >> "$LOG_FILE" 2>&1; then
+                log_info "udhcpc succeeded."
+                ip_address=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}' || true)
+                if [[ -n "$ip_address" ]]; then
+                    log_info "✓ Successfully obtained IP address via udhcpc: $ip_address"
+                    
+                    # Try ping with IP to test basic connectivity
+                    if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+                        log_info "✓ Ping to IP $PING_TARGET successful."
+                        return 0
+                    else
+                        log_warning "✗ Ping test failed despite having IP address."
+                        # Try to add a default route
+                        run_command ip route add default dev "$interface" || true
+                        if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+                            log_info "✓ Ping successful after adding route manually!"
+                            return 0
+                        else
+                            log_error "✗ Connection failed after adding manual route."
+                            return 1
+                        fi
+                    fi
+                    return 0
+                fi
+            fi
+        fi
+        
+        # Try dhclient as fallback
+        log_info "Trying dhclient as fallback (timeout ${DHCLIENT_TIMEOUT_SECONDS}s)..."
+        if timeout "$DHCLIENT_TIMEOUT_SECONDS" dhclient -v "$interface" >> "$LOG_FILE" 2>&1; then
+            log_info "dhclient completed successfully."
+            ip_address=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}' || true)
+            if [[ -n "$ip_address" ]]; then
+                log_info "✓ Successfully obtained IP address via dhclient: $ip_address"
+                
+                # Try ping with IP to test basic connectivity
+                if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+                    log_info "✓ Ping to IP $PING_TARGET successful."
+                    return 0
+                else
+                    log_warning "✗ Ping test failed despite having IP address."
+                    # Try to add a default route
+                    run_command ip route add default dev "$interface" || true
+                    if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+                        log_info "✓ Ping successful after adding route manually!"
+                        return 0
+                    else
+                        log_error "✗ Connection failed after adding manual route."
+                        return 1
+                    fi
+                fi
+                return 0
+            fi
+        fi
+        
+        log_error "✗ Failed to configure network interface with IP address."
+        return 1
+    fi
+    
+    # Extract IP configuration from bearer or logs
+    local bearer_ip
+    local bearer_prefix
+    local bearer_gateway
+    local bearer_dns1
+    local bearer_dns2
+
+    # Debug the bearer information for troubleshooting
+    log_debug "Bearer info content: $bearer_info"
+
+    # Manually dump the bearer information for better analysis
+    run_command mmcli -b "$bearer_index" || true
+
+    # Try different patterns for extracting IP info since formatting can vary
+    # Try various IP address patterns
+    bearer_ip=$(echo "$bearer_info" | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | head -1 || true)
+
+    # Set default prefix if we don't have one
+    bearer_prefix="24"
+    
+    # Extract the gateway directly from bearer info (looking for IP addresses)
+    bearer_gateway=$(echo "$bearer_info" | grep -A1 "gateway:" | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | head -1 || true)
+    
+    # Extract DNS servers
+    dns_servers=$(echo "$bearer_info" | grep -A1 "dns:" | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' || true)
+    bearer_dns1=$(echo "$dns_servers" | head -1 || true)
+    bearer_dns2=$(echo "$dns_servers" | sed -n '2p' || true)
+    
+    # Ensure we have the required minimum info
+    if [[ -z "$bearer_ip" || -z "$bearer_prefix" ]]; then
+        log_error "Could not extract IP configuration from bearer. Missing IP address or prefix."
+        log_debug "Bearer info: $bearer_info"
+        
+        # Try one more extraction method with a simpler pattern
+        bearer_ip=$(echo "$bearer_info" | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | head -1 || true)
+        
+        if [[ -n "$bearer_ip" ]]; then
+            log_info "Extracted IP address using fallback method: $bearer_ip"
+            # Set a default prefix if we found an IP but no prefix
+            bearer_prefix="24"
+            log_info "Using default prefix: $bearer_prefix"
+        else
+            log_error "Failed to extract any IP address. Connection cannot be configured."
+            return 1
+        fi
+    fi
+    
+    # Manual IP configuration using information from bearer
+    log_info "Configuring interface with static IP information from bearer"
+    
+    # Make sure interface is up again
+    run_command ip link set "$interface" up || true
+    
+    # Flush any existing IP configuration one more time
+    run_command ip addr flush dev "$interface" || true
+    
+    # Apply IP address and prefix
+    log_info "Setting IP address $bearer_ip/$bearer_prefix on $interface"
+    if ! run_command ip addr add "$bearer_ip/$bearer_prefix" dev "$interface"; then
+        log_error "Failed to set IP address on interface"
+        return 1
+    fi
+    
+    # Set default route via gateway if available
+    if [[ -n "$bearer_gateway" ]]; then
+        log_info "Setting default route via $bearer_gateway"
+        run_command ip route add default via "$bearer_gateway" dev "$interface" || true
+    else
+        log_warning "No gateway found in bearer info, attempting to add route without gateway"
+        run_command ip route add default dev "$interface" || true
+    fi
+
+    # Add a debug message to show what we're working with
+    log_debug "IP Address: $bearer_ip, Gateway: $bearer_gateway, DNS: $bearer_dns1, $bearer_dns2"
+    
+    # Configure DNS if available
+    if [[ -n "$bearer_dns1" ]]; then
+        log_info "Configuring DNS servers: $bearer_dns1, $bearer_dns2"
+        # Backup existing resolv.conf
+        if [[ -f /etc/resolv.conf ]]; then
+            cp /etc/resolv.conf /etc/resolv.conf.bak || true
+        fi
+        
+        # Create new resolv.conf
+        {
+            echo "nameserver $bearer_dns1"
+            [[ -n "$bearer_dns2" ]] && echo "nameserver $bearer_dns2"
+            echo "# Added by uconsole-4g script using bearer DNS"
+        } > /etc/resolv.conf || log_error "Failed to write DNS config"
+    fi
+    
+    # Verify the interface has the IP we set
+    sleep 2
+    local ip_address
+    ip_address=$(ip addr show "$interface" 2>/dev/null | grep "inet " | awk '{print $2}' || true)
+    
+    if [[ -z "$ip_address" ]]; then
+        log_error "✗ Failed to verify IP address on interface after configuration"
+        log_debug "Final interface status:"
+        run_command ip addr show "$interface" || true
+        log_debug "Final routing table:"
+        run_command ip route || true
+        return 1
+    fi
+    
+    log_info "✓ Successfully configured IP address: $ip_address"
+
+    # 6. Verify Connectivity and Setup DNS if needed
+    log_info "Step 6: Setting up DNS and testing connectivity..."
+    log_debug "Current routing table:"
+    run_command ip route || true
+    
+    # Check DNS configuration
+    local dns_set=0
+    if [[ -f /etc/resolv.conf ]]; then
+        if grep -q "nameserver" /etc/resolv.conf; then
+            log_debug "DNS configuration detected in /etc/resolv.conf"
+            dns_set=1
+        fi
+    fi
+    
+    # Only set up Google DNS if no DNS is configured and we didn't set bearer DNS
+    if [[ $dns_set -eq 0 && -z "$bearer_dns1" ]]; then
+        log_info "No DNS configuration detected, setting up Google DNS..."
+        # Backup existing resolv.conf
+        if [[ -f /etc/resolv.conf ]]; then
+            cp /etc/resolv.conf /etc/resolv.conf.bak || true
+        fi
+        # Add Google DNS
+        {
+            echo "nameserver 8.8.8.8"
+            echo "nameserver 8.8.4.4"
+            echo "# Added by uconsole-4g script using Google DNS"
+        } > /etc/resolv.conf || log_error "Failed to write DNS config"
+    fi
+    
+    # Try ping with IP first to test basic connectivity
+    if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+        log_info "✓ Ping to IP $PING_TARGET successful."
+        
+        # Try DNS resolution next
+        log_info "Testing DNS resolution..."
+        if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "www.google.com"; then
+            log_info "✓ DNS resolution successful. Connection fully established!"
+        else
+            log_warning "DNS resolution failed. Connection may be limited to IP-only access."
+            # Add specific DNS instruction
+            log_info "Consider manually adding DNS servers to /etc/resolv.conf if needed."
+        fi
+        
+        # Log signal quality
+        local signal
+        signal=$(mmcli -m "$modem_index" 2>/dev/null | grep "signal quality" | sed 's/.*signal quality: \([0-9]*\)%.*/\1/g' || true)
+        if [[ -n "$signal" ]]; then
+            log_info "Signal quality: $signal%"
+        fi
+        return 0
+    else
+        log_error "✗ Ping to IP $PING_TARGET failed. Connection might be incomplete (check routing)."
+        log_info "Trying to add default route manually..."
+        # Try to add a default route via the detected interface
+        run_command ip route add default dev "$interface" || true
+        # Try one more ping after adding route
+        if run_command ping -c "$PING_COUNT" -W "$PING_TIMEOUT_SECONDS" "$PING_TARGET"; then
+            log_info "✓ Ping successful after adding route manually!"
+            return 0
+        else
+            return 1
+        fi
+    fi
+}
+
+function disconnect_4g {
+    log_info "Disconnecting from the internet..."
+    if ! _check_dependencies mmcli ip dhclient; then return 1; fi
+
+    local modem_index
+    local interface
+    local bearer_index
+
+    modem_index=$(_find_modem_index) || { log_info "No modem detected, nothing to disconnect."; return 0; }
+    log_info "Using modem index: $modem_index"
+
+    interface=$(_find_wwan_interface) || interface="wwan0" # Use default if detection fails
+    # Clean the interface name properly
+    interface=$(_clean_interface_name "$interface")
+    log_info "Using network interface: $interface"
+
+    # 1. Release DHCP lease
+    if ip link show "$interface" &>/dev/null; then
+        if ip addr show "$interface" 2>/dev/null | grep -q "inet "; then
+            log_info "Releasing DHCP lease for $interface..."
+            # Use run_command, ignore errors if lease already gone
+            run_command dhclient -r "$interface" || log_debug "dhclient -r failed (maybe no lease)."
+        else
+            log_debug "Interface $interface has no IP address, skipping DHCP release."
+        fi
+    else
+        log_debug "Interface $interface not found, skipping DHCP release."
+    fi
+
+    # 2. Disconnect Bearer
+    log_info "Disconnecting bearer..."
+    # Find active bearer first
+    bearer_index=$(mmcli -m "$modem_index" --list-bearers 2>/dev/null | grep -o "/org/freedesktop/ModemManager1/Bearer/[0-9]*" | grep -o "[0-9]*" | head -1 || true)
+
+    if [[ -n "$bearer_index" ]]; then
+        log_info "Found active bearer: $bearer_index. Disconnecting..."
+        if run_command mmcli -m "$modem_index" --simple-disconnect; then
+            log_info "✓ Successfully disconnected bearer using simple-disconnect."
+        else
+            log_warning "Simple-disconnect failed, trying specific bearer $bearer_index..."
+            if run_command mmcli -b "$bearer_index" --disconnect; then
+                 log_info "✓ Successfully disconnected specific bearer $bearer_index."
+            else
+                 log_error "✗ Failed to disconnect specific bearer $bearer_index."
+                 # Don't fail the whole script, proceed to interface down
+            fi
+        fi
+    else
+        log_info "No active connection bearer found to disconnect."
+    fi
+
+    # 3. Bring Interface Down
+    # Make sure interface is clean one last time
+    interface=$(_clean_interface_name "$interface")
+    
+    if ip link show "$interface" &>/dev/null; then
+        log_info "Bringing interface $interface down..."
+        if run_command ip link set "$interface" down; then
+            log_debug "Interface $interface set down."
+        else
+            log_error "Failed to set interface $interface down."
+        fi
+    else
+         log_debug "Interface $interface not found, skipping set down."
+    fi
+
+    log_info "✓ Disconnect sequence completed."
+    return 0
+}
+
+function diagnose_modem {
+    log_info "Running comprehensive modem diagnostics..."
+    
+    log_info "=== System Information ==="
+    run_command uname -a || true
+    run_command lsb_release -a || true
+    run_command ip addr || true
+    run_command ip route || true
+    run_command systemctl status ModemManager || true
+    run_command mmcli -L || true
+    log_info "=== End System Information ==="
+
+    log_info "=== Hardware Detection ==="
+    run_command lsusb | grep -i 'modem\|huawei\|zte\|sierra\|quectel\|simcom' || log_debug "No known modem strings found in lsusb."
+    run_command lspci | grep -i 'network\|modem' || log_debug "No known modem strings found in lspci."
+    log_info "Checking recent dmesg for modem/tty/wwan..."
+    run_command dmesg | tail -n 100 | grep -i 'tty\|modem\|wwan\|sim' || log_debug "No relevant strings found in recent dmesg."
+
+    log_info "=== ModemManager Status ==="
+    run_command systemctl is-active ModemManager || true
+    run_command systemctl status ModemManager || true
+    log_info "Fetching last 50 lines of ModemManager journal..."
+    run_command journalctl --no-pager -n 50 -u ModemManager || true
+
+    log_info "=== Modem Information (mmcli) ==="
+    run_command mmcli -L || true
+    local modem_index
+    if modem_index=$(_find_modem_index 2>/dev/null); then
+        log_info "Detailed modem information for index $modem_index:"
+        run_command mmcli -m "$modem_index" --verbose || true
+    else
+        log_info "No modem index found for detailed info."
+    fi
+
+    log_info "=== Network Interface Status ==="
+    run_command ip addr || true
+    run_command ip route || true
+    # ifconfig is often not installed by default, make it optional
+    if command -v ifconfig &>/dev/null; then
+        run_command ifconfig -a || true
+    else
+        log_debug "ifconfig command not found, skipping."
+    fi
+
+    log_info "=== Network Connectivity Test ==="
+    run_command ping -c 3 "$PING_TARGET" || log_error "Ping test failed."
+
+    log_info "=== uConsole CM5 GPIO Test ==="
+    if command -v gpioinfo &>/dev/null; then
+        run_command gpioinfo "$GPIO_CHIP" | grep -E "line ${GPIO_MODEM_POWER}:|line ${GPIO_MODEM_RESET}:" || log_debug "Could not get GPIO info."
+    else
+        log_debug "gpioinfo command not found, skipping GPIO test."
+    fi
+
+    log_info "Diagnostics complete. Log file: $LOG_FILE"
+    echo "Diagnostics complete. See log file for details: $LOG_FILE"
+}
+
+# --- Main Execution ---
+
+# Check for root privileges early
+if [[ "$EUID" -ne 0 ]]; then
+    printf "Error: This script requires root privileges.\nPlease run with sudo: sudo %s %s\n" "$SCRIPT_NAME" "$*" >&2
+    exit 1
+fi
+
+# Initialize Log File
+# Use a predictable timestamp format suitable for filenames
+timestamp=$(date +%Y%m%d_%H%M%S)
+LOG_FILE="${LOG_FILE_BASE}-${timestamp}.log"
+# Create/truncate log file and write header
+echo "=== uConsole CM5 4G Modem Manager Log - $(date) ===" > "$LOG_FILE"
+echo "Script: $SCRIPT_NAME" >> "$LOG_FILE"
+echo "Command: $*" >> "$LOG_FILE"
+echo "--------------------------------------------------" >> "$LOG_FILE"
+# Ensure log file is writable
+if ! touch "$LOG_FILE"; then
+   printf "Error: Cannot write to log file: %s\nCheck permissions or path.\n" "$LOG_FILE" >&2
+   exit 1
+fi
+log_info "Starting script..."
+log_info "Log file: $LOG_FILE"
+log_debug "Debug mode enabled."
+
+# Process command line arguments
+if [[ $# -eq 0 ]]; then
+    log_error "No command provided."
+    show_help
+    exit 1
+fi
+
+COMMAND="$1"
+log_info "Processing command: $COMMAND"
+exit_status=0
+
+case "$COMMAND" in
+    status)
+        check_modem_status
+        exit_status=$?
+        ;;
+    enable)
+        enable_4g
+        exit_status=$?
+        ;;
+    disable)
+        disable_4g
+        exit_status=$?
+        ;;
+    connect)
+        connect_4g
+        exit_status=$?
+        ;;
+    disconnect)
+        disconnect_4g
+        exit_status=$?
+        ;;
+    unlock)
+        unlock_sim
+        exit_status=$?
+        ;;
+    diagnose)
+        diagnose_modem
+        exit_status=$?
+        ;;
+    reset)
+        log_info "--- Performing full modem reset cycle ---"
+        log_info "Step 1: Disconnecting..."
+        disconnect_4g || log_warning "Disconnect failed, continuing reset..."
+        log_info "Step 2: Disabling modem..."
+        disable_4g || log_warning "Disable failed, continuing reset..."
+        log_info "Step 3: Restarting ModemManager..."
+        _ensure_modemmanager_active || log_warning "ModemManager restart failed, continuing reset..."
+        log_info "Step 4: Enabling modem..."
+        enable_4g || log_error "Enable failed during reset cycle."
+        exit_status=$?
+        if [[ $exit_status -eq 0 ]]; then
+            log_info "Step 5: Connecting to internet..."
+            connect_4g || log_error "Connect failed during reset cycle."
+            exit_status=$?
+        fi
+        log_info "--- Reset cycle complete ---"
+        ;;
+    help|--help|-h)
+        show_help
+        exit_status=0
+        ;;
+    *)
+        log_error "Unknown command: $COMMAND"
+        show_help
+        exit_status=1
+        ;;
+esac
+
+if [[ $exit_status -eq 0 ]]; then
+    log_info "Command '$COMMAND' completed successfully."
+else
+    log_error "Command '$COMMAND' failed with exit code $exit_status."
+fi
+
+log_info "Script execution finished."
+exit $exit_status
