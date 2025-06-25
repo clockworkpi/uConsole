@@ -48,6 +48,14 @@ mkdir -p ../linux-headers-${KERNEL_VER}
 make headers_install INSTALL_HDR_PATH=../linux-headers-${KERNEL_VER}
 ```
 
+- In pi-gen , we added some modifcations:
+1. Pull up gpio9 at boot,so that screen will turn on right away when Power on
+2. Set default lcd backlight to 3 
+3. Set default desktop to be large screen
+4. No wallpaper, only black color
+5. Fn+<> to adjust lcd backlight
+
+
 
 - All official uConsole OS images can be found here:  
   [uConsole Images Repository](https://github.com/clockworkpi/uConsole/tree/master/images)
