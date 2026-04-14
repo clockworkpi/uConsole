@@ -5,7 +5,7 @@
 
 |Product | Image name  |Release date | System  | Kernel |Size|      Downloads      | MD5sum | 
 |--------|:----------|:------------|:--------|:--------------|:------------|:--------------|:---------:| 
-|uConsole CM4 | uConsole_CM4_v2.1_64bit.img.bz2| Jan  7 2025 | 64-bit| Linux 6.12.62| 1.9G | [Download](http://dl.clockworkpi.com/uConsole_CM4_v2.1_64bit.img.bz2 ) ([Mirror](https://drive.google.com/file/d/19opOCg8v4fdNUhuCaZWnBykgqyoU4-Bx/view?usp=drive_link  )) | b14715f3fe2789ef8b40dded37c3bc63 |
+|uConsole CM4 | uConsole_CM4_v3.1_64bit.img.bz2| April  14 2026 | 64-bit| Linux 6.12.62| 2.1G | [Download](http://dl.clockworkpi.com/uConsole_CM4_v3.1_64bit.img.bz2 ) ([Mirror](https://drive.google.com/file/d/17OFCPCBwddaqQ957R4vbY-3KzugGtaU-/view?usp=drive_link )) | 1b31b501d11d95da7f1380d50d47a8a9 |
 |uConsole CM4 | uConsole_CM4_v0.1b_xfce_64bit.img.7z| Apr  5  2023 | 64-bit| Linux 5.10.17| 1.2G | [Download](http://dl.clockworkpi.com/uConsole_CM4_v0.1b_xfce_64bit.img.7z ) ([Mirror](https://drive.google.com/file/d/1gBpVK1rMM5zmq5z4-DlKlDmTFJQvwMFz/view?usp=drive_link )) | a191603d7da0f826d347f1bb8d525687 |
 |uConsole A06 | uConsole_A06_v1.1e.img.7z| Jul  1  2023 | 64-bit| Linux 5.15.119| 1.4G | [Download]( http://dl.clockworkpi.com/uConsole_A06_v1.1e.img.7z) ([Mirror](https://drive.google.com/file/d/1H5wdB_cCSW-qbf6Ijgcn-Uw4EQQkWrP1/view?usp=drive_link )) | 56bbb623f41bf6327d408fb415052819 |
 |uConsole R01 | uConsole_R01_v1.3b.img.7z| Jun 13  2023 | 64-bit| Linux 5.4.61| 1.4G | [Download](http://dl.clockworkpi.com/uConsole_R01_v1.3b.img.7z ) ([Mirror](https://drive.google.com/file/d/1lDdO3-aj8zeO6JDJVBaCgNkehhffdNm1/view?usp=drive_link )) | 53ca37ccc0333436d06fb5978ac699fd |
