@@ -22,9 +22,9 @@ you don't need any following steps
 
 just make sure the SIM card inserted correctlly,and use **sudo ifconfig** to see if there is a **usb0** 
 
-if there is a usb0,then all is set  
+if there is a `usb0`,then all is set  
 
-normally you will have ipv4 and ipv6 address,now you can use 4G card to view internet
+normally you will have ipv4 and ipv6 address,now you can use 4G card to view internet  
 
 #### 9001 part
 
@@ -56,9 +56,9 @@ echo -en "AT+CUSBPIDSWITCH?\r\n" | sudo socat - /dev/ttyUSB2,crnl
 
 we expecting to see **9001**
 
-if you are other module number ,eg :9011
+if you are other module number ,eg :`9011`
 
-you don't need any following steps
+**you don't need any following steps**
 
 just make sure the SIM card inserted correctlly,and use **sudo ifconfig** to see if there is a **usb0** 
 
@@ -106,6 +106,99 @@ sudo nmcli c up 4gnet
 ```
 
 then if everything goes right, you will see **ppp0** in `sudo ifconfig` , which means you got an PPPoE connection and an IP address
+
+If some errors occured like:  
+
+```
+Error: Connection activation failed: No suitable device found for this connection (device eth0 not available because profile is not compatible with device (mismatching interface name)).
+```
+```
+Error: Connection activation failed: No suitable device found for this connection (device ttyUSB2 not available because device is not available).
+```
+
+try to use `mmcli -m  any` to see whether the SIM card is properly installed, still within its valid service period, and has data service enabled.
+
+here is a false state example output :
+```
+  -----------------------------
+  General  |              path: /org/freedesktop/ModemManager1/Modem/0
+           |         device id: a593c5055fabfa914496a4977012f1a829cf320f
+  -----------------------------
+  Hardware |      manufacturer: SIMCOM INCORPORATED
+           |             model: SIMCOM_SIM7600G-H
+           | firmware revision: LE20B04SIM7600G22
+           |         supported: gsm-umts
+           |           current: gsm-umts
+           |      equipment id: xxxxxxxxxxxxxxxxx
+  -----------------------------
+  System   |            device: /sys/devices/platform/soc/fe980000.usb/usb1/1-1/1-1.3
+           |           physdev: /sys/devices/platform/soc/fe980000.usb/usb1/1-1/1-1.3
+           |           drivers: option
+           |            plugin: simtech
+           |      primary port: ttyUSB2
+           |             ports: ttyUSB0 (ignored), ttyUSB1 (gps), ttyUSB2 (at), 
+           |                    ttyUSB3 (at), ttyUSB4 (audio)
+  -----------------------------
+  Status   |             state: failed
+           |     failed reason: sim-missing
+           |       power state: on
+  -----------------------------
+  Modes    |         supported: allowed: any; preferred: none
+           |           current: allowed: any; preferred: none
+  -----------------------------
+  3GPP     |              imei: xxxxxxxxxxxxxxx
+```
+
+here is a connected state example output:
+```
+  ----------------------------------
+  General  |                   path: /org/freedesktop/ModemManager1/Modem/0
+           |              device id: a593c5055fabfa914496a4977012f1a829cf320f
+  ----------------------------------
+  Hardware |           manufacturer: SIMCOM INCORPORATED
+           |                  model: SIMCOM_SIM7600G-H
+           |      firmware revision: LE20B04SIM7600G22
+           |              supported: gsm-umts, lte
+           |                current: gsm-umts, lte
+           |           equipment id: xxxxxxxxxxxxxxxxx
+  ----------------------------------
+  System   |                 device: /sys/devices/platform/soc/fe980000.usb/usb1/1-1/1-1.3
+           |                physdev: /sys/devices/platform/soc/fe980000.usb/usb1/1-1/1-1.3
+           |                drivers: option
+           |                 plugin: simtech
+           |           primary port: ttyUSB2
+           |                  ports: ttyUSB0 (ignored), ttyUSB1 (gps), ttyUSB2 (at), 
+           |                         ttyUSB3 (at), ttyUSB4 (audio)
+  ----------------------------------
+  Status   |         unlock retries: sim-pin (3), sim-puk (10), sim-pin2 (3), sim-puk2 (10)
+           |                  state: connected
+           |            power state: on
+           |            access tech: lte
+           |         signal quality: 74% (recent)
+  ----------------------------------
+  Modes    |              supported: allowed: 2g; preferred: none
+           |                         allowed: 3g; preferred: none
+           |                         allowed: 2g, 3g; preferred: none
+           |                         allowed: 2g, 3g; preferred: 2g
+           |                         allowed: 2g, 3g; preferred: 3g
+           |                current: allowed: any; preferred: none
+  ----------------------------------
+  IP       |              supported: ipv4, ipv6, ipv4v6
+  ----------------------------------
+  3GPP     |                   imei: xxxxxxxxxxxxxxx
+           |            operator id: 46000
+           |          operator name: SOME ISP NAME
+           |           registration: home
+           |   packet service state: attached
+  ----------------------------------
+  3GPP EPS |   ue mode of operation: csps-1
+           |    initial bearer path: /org/freedesktop/ModemManager1/Bearer/0
+           | initial bearer ip type: ipv4
+  ----------------------------------
+  SIM      |       primary sim path: /org/freedesktop/ModemManager1/SIM/0
+  ----------------------------------
+  Bearer   |                  paths: /org/freedesktop/ModemManager1/Bearer/1
+```
 
 
 The connectivity of 4G may vary in different countries around the world, so please make appropriate adjustments based on the situation of your ISP operator, which may require some Linux-related skills.
