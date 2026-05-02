@@ -2,7 +2,7 @@ First we need [power on the 4G extension](https://github.com/clockworkpi/uConsol
 
 Then use [AT commands](https://github.com/clockworkpi/uConsole/blob/master/SIM7500_SIM7600%20Series_AT%20Command%20Manual_V3.00.pdf) to do the jobs in uConsole
 
-We use /dev/ttyUSB3 as AT port  
+We use /dev/ttyUSB3 as AT port, but if /dev/ttyUSB3 has no response, try /dev/ttyUSB2 instead  
 
 ## Check sim card if is ready
 ```
@@ -35,12 +35,18 @@ replace **123456** with your really target phone number
 
 ## Hang up phone call
 ```
-echo -en "AT+CVHU=0\r\n" | sudo socat - /dev/ttyUSB3,crnl
+echo -en "AT+CHUP\r\n" | sudo socat - /dev/ttyUSB3,crnl
 echo -en "ATH\r\n" | sudo socat - /dev/ttyUSB3,crnl
 
 OK
 
 +CLCC: 3,0,6,0,0,"123456",129
+
+VOICE CALL: END: 000054
+
+OK
+
++PPPD: DISCONNECTED
 
 OK
 ```
