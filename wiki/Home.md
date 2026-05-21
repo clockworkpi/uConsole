@@ -15,6 +15,9 @@ A guide on how to use the 4G extension module for making phone calls and sending
 * [How to Upgrade 4G Extension Firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-upgrade-4G-extension-firmware)  
 Learn how to update the firmware of the 4G extension module to access the latest features and fixes.
 
+* [How to Downgrade 4G Extension Firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-downgrade-4G-extension-firmware)  
+Learn how to downgrade the firmware of the 4G extension module to 9001.  
+
 * [How to Use the Keyboard UART Port to Flash Firmware](https://github.com/clockworkpi/uConsole/wiki/How-to-use-keyboard-UART-port-to-flash-firmware)  
 Detailed instructions on how to flash firmware using the keyboard's UART port.
 

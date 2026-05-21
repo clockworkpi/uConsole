@@ -6,8 +6,7 @@ The following-mentioned flashing operation requires your familiarity with Linux 
 
 as we will not be held responsible for any consequences. Thank you for your understanding.
 
-once you flashed the new firmware, there is no going back
-even if you switch id from 9011 to 9001 ,mmcli may  not able to see the 4G modem any more.
+once you flashed the new firmware, if you need to downgrade,check [this](https://github.com/clockworkpi/uConsole/wiki/How-to-downgrade-4G-extension-firmware) out.  
 
 Therefore, there are risks involved in flashing the 4g ext, and it is necessary for you to have a certain understanding of these background information. During the testing process, it is also not possible for me to test whether all SIM cards worldwide can easily connect to the internet through **usb0**.
 
