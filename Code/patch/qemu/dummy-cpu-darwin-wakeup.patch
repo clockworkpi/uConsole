@@ -1,0 +1,100 @@
+Subject: accel: use counted wakeups for Darwin dummy CPU threads
+
+The running raspi4b qtest lifecycle stress test can stall on Darwin in
+sigwait while pause_all_vcpus waits for the dummy CPU to acknowledge stop.
+Use QEMU's semaphore on Darwin, as the dummy loop already does on Windows.
+Initialize it before thread creation and pair it with an accelerator kick
+callback. Other POSIX platforms retain their existing signal implementation.
+This changes neither TCG nor HVF CPU threads.
+
+--- a/include/hw/core/cpu.h
++++ b/include/hw/core/cpu.h
+@@ -486,7 +486,7 @@
+     int nr_threads;
+ 
+     struct QemuThread *thread;
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__APPLE__)
+     QemuSemaphore sem;
+ #endif
+     int thread_id;
+--- a/accel/dummy-cpus.h
++++ b/accel/dummy-cpus.h
+@@ -10,5 +10,6 @@
+ #define ACCEL_DUMMY_CPUS_H
+ 
+ void dummy_start_vcpu_thread(CPUState *cpu);
++void dummy_kick_vcpu_thread(CPUState *cpu);
+ 
+ #endif
+--- a/accel/dummy-cpus.c
++++ b/accel/dummy-cpus.c
+@@ -30,7 +30,7 @@
+     cpu->thread_id = qemu_get_thread_id();
+     current_cpu = cpu;
+ 
+-#ifndef _WIN32
++#if !defined(_WIN32) && !defined(__APPLE__)
+     sigset_t waitset;
+     int r;
+ 
+@@ -45,7 +45,7 @@
+     do {
+         qemu_process_cpu_events(cpu);
+         bql_unlock();
+-#ifndef _WIN32
++#if !defined(_WIN32) && !defined(__APPLE__)
+         do {
+             int sig;
+             r = sigwait(&waitset, &sig);
+@@ -65,6 +65,18 @@
+     return NULL;
+ }
+ 
++void dummy_kick_vcpu_thread(CPUState *cpu)
++{
++#ifdef __APPLE__
++    /* A counted notification remains available until the waiter consumes it. */
++    if (!qatomic_xchg(&cpu->thread_kicked, true)) {
++        qemu_sem_post(&cpu->sem);
++    }
++#else
++    cpus_kick_thread(cpu);
++#endif
++}
++
+ void dummy_start_vcpu_thread(CPUState *cpu)
+ {
+     char thread_name[VCPU_THREAD_NAME_SIZE];
+@@ -72,8 +84,8 @@
+     snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/DUMMY",
+              cpu->cpu_index);
++#if defined(_WIN32) || defined(__APPLE__)
++    qemu_sem_init(&cpu->sem, 0);
++#endif
+     qemu_thread_create(cpu->thread, thread_name, dummy_cpu_thread_fn, cpu,
+                        QEMU_THREAD_JOINABLE);
+-#ifdef _WIN32
+-    qemu_sem_init(&cpu->sem, 0);
+-#endif
+ }
+--- a/accel/qtest/qtest.c
++++ b/accel/qtest/qtest.c
+@@ -66,6 +66,7 @@
+     AccelOpsClass *ops = ACCEL_OPS_CLASS(oc);
+ 
+     ops->create_vcpu_thread = dummy_start_vcpu_thread;
++    ops->kick_vcpu_thread = dummy_kick_vcpu_thread;
+     ops->get_virtual_clock = qtest_get_virtual_clock;
+     ops->set_virtual_clock = qtest_set_virtual_clock;
+     ops->handle_interrupt = generic_handle_interrupt;
+--- a/accel/xen/xen-all.c
++++ b/accel/xen/xen-all.c
+@@ -154,6 +154,7 @@
+     AccelOpsClass *ops = ACCEL_OPS_CLASS(oc);
+ 
+     ops->create_vcpu_thread = dummy_start_vcpu_thread;
++    ops->kick_vcpu_thread = dummy_kick_vcpu_thread;
+     ops->handle_interrupt = generic_handle_interrupt;
+ }
+ 

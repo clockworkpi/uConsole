@@ -1,0 +1,15 @@
+diff --git a/src/window/test/popupwindow.cpp b/src/window/test/popupwindow.cpp
+index f9498d2..7ec1bae 100644
+--- a/src/window/test/popupwindow.cpp
++++ b/src/window/test/popupwindow.cpp
+@@ -112,8 +112,8 @@ void TestPopupWindow::moveWithParent() { // NOLINT
+ 	parent.backingWindow()->setX(10);
+ 	parent.backingWindow()->setY(10);
+ 
+-	QCOMPARE(popup.x(), parent.x() + 10);
+-	QCOMPARE(popup.y(), parent.y() + 10);
++	QTRY_COMPARE(popup.x(), parent.x() + 10);
++	QTRY_COMPARE(popup.y(), parent.y() + 10);
+ }
+ 
+ void TestPopupWindow::attachParentLate() { // NOLINT

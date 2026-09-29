@@ -1,0 +1,101 @@
+BCM2835 I2C: add bounded polling transfers for late PMIC power-off
+
+Target: cuu/ClockworkPi-linux 03436f4117533693d608b10eb4b3965987230b68.
+Reuse the transfer state machine without enabling controller interrupts
+when the I2C core requests atomic execution. Poll completion with a bounded
+atomic delay instead of sleeping for an interrupt. Ordinary transfers
+retain their existing IRQ-driven path. This is a candidate kernel fix,
+not hardware-qualified or automatically installed into guest images.
+
+---
+diff --git a/drivers/i2c/busses/i2c-bcm2835.c b/drivers/i2c/busses/i2c-bcm2835.c
+--- a/drivers/i2c/busses/i2c-bcm2835.c
++++ b/drivers/i2c/busses/i2c-bcm2835.c
+@@ -11,6 +11,7 @@
+ #include <linux/i2c.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
++#include <linux/iopoll.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+@@ -81,6 +82,7 @@
+ 	struct i2c_msg *curr_msg;
+ 	struct clk *bus_clk;
+ 	int num_msgs;
++	bool atomic;
+ 	u32 msg_err;
+ 	u8 *msg_buf;
+ 	size_t msg_buf_remaining;
+@@ -351,6 +353,9 @@
+ 
+ 	if (last_msg)
+ 		c |= BCM2835_I2C_C_INTD;
++	if (i2c_dev->atomic)
++		c &= ~(BCM2835_I2C_C_INTR | BCM2835_I2C_C_INTT |
++		       BCM2835_I2C_C_INTD);
+ 
+ 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_A, msg->addr);
+ 	bcm2835_i2c_writel(i2c_dev, BCM2835_I2C_DLEN, msg->len);
+@@ -438,8 +443,8 @@
+ 	return IRQ_HANDLED;
+ }
+ 
+-static int bcm2835_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+-			    int num)
++static int bcm2835_i2c_xfer_common(struct i2c_adapter *adap,
++				   struct i2c_msg msgs[], int num, bool atomic)
+ {
+ 	struct bcm2835_i2c_dev *i2c_dev = i2c_get_adapdata(adap);
+ 	unsigned long time_left;
+@@ -466,12 +471,23 @@
+ 	i2c_dev->curr_msg = msgs;
+ 	i2c_dev->num_msgs = num;
+ 	i2c_dev->msg_err = 0;
++	i2c_dev->atomic = atomic;
+ 	reinit_completion(&i2c_dev->completion);
+ 
+ 	bcm2835_i2c_start_transfer(i2c_dev);
+ 
+-	time_left = wait_for_completion_timeout(&i2c_dev->completion,
++	if (atomic) {
++		irqreturn_t handled;
++
++		/* Late PMIC power-off cannot sleep or wait for an IRQ. */
++		time_left = !read_poll_timeout_atomic(bcm2835_i2c_isr, handled,
++				completion_done(&i2c_dev->completion), 5,
++				jiffies_to_usecs(adap->timeout), false,
++				i2c_dev->irq, i2c_dev);
++	} else {
++		time_left = wait_for_completion_timeout(&i2c_dev->completion,
+ 						adap->timeout);
++	}
+ 
+ 	bcm2835_i2c_finish_transfer(i2c_dev);
+ 
+@@ -501,6 +517,18 @@
+ 	return -EIO;
+ }
+ 
++static int bcm2835_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
++			    int num)
++{
++	return bcm2835_i2c_xfer_common(adap, msgs, num, false);
++}
++
++static int bcm2835_i2c_xfer_atomic(struct i2c_adapter *adap,
++				 struct i2c_msg msgs[], int num)
++{
++	return bcm2835_i2c_xfer_common(adap, msgs, num, true);
++}
++
+ static u32 bcm2835_i2c_func(struct i2c_adapter *adap)
+ {
+ 	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL | I2C_FUNC_PROTOCOL_MANGLING;
+@@ -508,6 +536,7 @@
+ 
+ static const struct i2c_algorithm bcm2835_i2c_algo = {
+ 	.xfer = bcm2835_i2c_xfer,
++	.xfer_atomic = bcm2835_i2c_xfer_atomic,
+ 	.functionality = bcm2835_i2c_func,
+ };

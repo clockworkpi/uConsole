@@ -1,0 +1,69 @@
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -115,14 +115,20 @@
+         "/soc/i2c@7e205000/pmic@34/ac-power-supply", "compatible",
+         "x-powers,axp221-ac-power-supply");
+     /* Working ADC profile; this is not a claim that every carrier has one. */
+-    uint32_t reference = qemu_fdt_alloc_phandle(fdt);
++    bool reference_present = object_property_get_bool(
++        object_resolve_path("/machine/battery-adc", NULL),
++        "reference-supply-present", &error_fatal);
++    uint32_t reference = 0;
++    if (reference_present) {
++        reference = qemu_fdt_alloc_phandle(fdt);
+-    qemu_fdt_add_subnode(fdt, "/uconsole-adc-reference");
+-    qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "compatible", "regulator-fixed");
+-    qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "regulator-name", "adc-reference");
+-    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "phandle", reference);
+-    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-min-microvolt", 3300000);
+-    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-max-microvolt", 3300000);
+-    qemu_fdt_setprop(fdt, "/uconsole-adc-reference", "regulator-always-on", NULL, 0);
++        qemu_fdt_add_subnode(fdt, "/uconsole-adc-reference");
++        qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "compatible", "regulator-fixed");
++        qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "regulator-name", "adc-reference");
++        qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "phandle", reference);
++        qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-min-microvolt", 3300000);
++        qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-max-microvolt", 3300000);
++        qemu_fdt_setprop(fdt, "/uconsole-adc-reference", "regulator-always-on", NULL, 0);
++    }
+     qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000", "status", "okay");
+     qemu_fdt_add_subnode(fdt, "/soc/i2c@7e804000/adc@54");
+     qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000/adc@54", "compatible", "ti,adc101c");
+@@ -131,7 +137,16 @@
+     qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e804000/adc@54", "reg", 0x54);
++    if (reference_present) {
+-    qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e804000/adc@54", "vref-supply", reference);
++        qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e804000/adc@54", "vref-supply", reference);
++    } else {
++        int result = fdt_delprop(fdt,
++            fdt_path_offset(fdt, "/soc/i2c@7e804000/adc@54"), "vref-supply");
++        if (result < 0 && result != -FDT_ERR_NOTFOUND) {
++            error_report("Cannot remove ADC reference supply: %s", fdt_strerror(result));
++            exit(1);
++        }
++    }
+     qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000/adc@54", "status", "okay");
+ 
+ }
+ 
+ static void raspi4b_machine_init(MachineState *machine)
+@@ -147,6 +162,10 @@
+     object_initialize_child(OBJECT(machine), "soc", soc,
+                             board_soc_type(mc->board_rev));
+ 
++    /* DT loading in base init needs this object's configured profile. The
++     * I2C bus is realized by base init, so attach the slave afterwards. */
++    adc = i2c_slave_new("adc101c", 0x54);
++    object_property_add_child(OBJECT(machine), "battery-adc", OBJECT(adc));
+     raspi_base_machine_init(machine, &soc->parent_obj);
+ 
+     pmic = i2c_slave_create_simple(soc->peripherals.parent_obj.i2c[0].bus,
+@@ -154,8 +173,6 @@
+     qdev_connect_gpio_out(DEVICE(pmic), 0,
+         qemu_irq_invert(qdev_get_gpio_in(DEVICE(&soc->peripherals.gpio), 2)));
+-    adc = i2c_slave_new("adc101c", 0x54);
+-    object_property_add_child(OBJECT(machine), "battery-adc", OBJECT(adc));
+     i2c_slave_realize_and_unref(adc, soc->peripherals.parent_obj.i2c[1].bus,
+                               &error_fatal);
+     /* ALERT has no verified carrier GPIO route; expose state, do not invent one. */
+ }

@@ -1,0 +1,10 @@
+--- a/hw/usb/meson.build
++++ b/hw/usb/meson.build
+@@ -44,6 +44,7 @@
+ system_ss.add(when: 'CONFIG_USB_AUDIO', if_true: files('dev-audio.c'))
+ system_ss.add(when: 'CONFIG_USB_AUDIO', if_true: files('dev-forge-capture.c'))
+ system_ss.add(when: 'CONFIG_USB_SERIAL', if_true: files('dev-serial.c'))
++system_ss.add(when: 'CONFIG_USB_NETWORK', if_true: files('forge-modem.c'))
+ system_ss.add(when: 'CONFIG_USB_NETWORK', if_true: files('dev-network.c'))
+ if host_os != 'windows'
+   system_ss.add(when: 'CONFIG_USB_STORAGE_MTP', if_true: files('dev-mtp.c'))

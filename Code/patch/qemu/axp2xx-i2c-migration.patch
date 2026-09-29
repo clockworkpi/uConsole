@@ -1,0 +1,32 @@
+--- a/hw/misc/axp2xx.c
++++ b/hw/misc/axp2xx.c
+@@ -505,6 +505,12 @@
+ {
+     AXP2xxI2CState *s = opaque;
+ 
++    /* Prototype AXP221 streams omitted the active I2C slave state. Do not
++     * silently accept them as a recoverable in-flight transaction. Keep the
++     * older AXP209 compatibility policy unchanged. */
++    if (version_id < 3 && AXP2XX_GET_CLASS(s)->irq_model) {
++        return -EINVAL;
++    }
+     if (version_id < 2) {
+         s->key_pressed = false;
+     }
+@@ -516,7 +522,7 @@
+ 
+ static const VMStateDescription vmstate_axp2xx = {
+     .name = TYPE_AXP2XX,
+-    .version_id = 2,
++    .version_id = 3,
+     .minimum_version_id = 1,
+     .post_load = axp2xx_post_load,
+     .fields = (const VMStateField[]) {
+@@ -524,6 +530,7 @@
+         VMSTATE_UINT8(ptr, AXP2xxI2CState),
+         VMSTATE_UINT8(count, AXP2xxI2CState),
+         VMSTATE_BOOL_V(key_pressed, AXP2xxI2CState, 2),
++        VMSTATE_STRUCT(i2c, AXP2xxI2CState, 3, vmstate_i2c_slave, I2CSlave),
+         VMSTATE_END_OF_LIST()
+     }
+ };

@@ -1,0 +1,34 @@
+--- a/hw/usb/hcd-dwc2.c
++++ b/hw/usb/hcd-dwc2.c
+@@ -511,7 +511,11 @@
+     assert(port->index == 0);
+     p = container_of(packet, DWC2Packet, packet);
+     dev = dwc2_find_device(s, p->devadr);
+-    ep = usb_ep_get(dev, p->pid, p->epnum);
++    ep = dev ? usb_ep_get(dev, p->pid, p->epnum) : NULL;
++    if (!dev && packet->status != USB_RET_REMOVE_FROM_QUEUE) {
++        packet->status = USB_RET_NODEV;
++        packet->actual_length = 0;
++    }
+     trace_usb_dwc2_async_packet_complete(port, packet, p->index >> 3, dev,
+                                          p->epnum, dirs[p->epdir], p->len);
+     assert(p->async == DWC2_ASYNC_INFLIGHT);
+@@ -591,8 +595,15 @@
+         p = &s->packet[chan];
+         if (p->needs_service) {
+             dev = dwc2_find_device(s, p->devadr);
+-            ep = usb_ep_get(dev, p->pid, p->epnum);
+-            trace_usb_dwc2_work_bh_service(s->next_chan, chan, dev, p->epnum);
+-            dwc2_handle_packet(s, p->devadr, dev, ep, p->index, true);
++            if (!dev) {
++                p->needs_service = false;
++                s->hreg1[p->index] &= ~HCCHAR_CHENA;
++                s->hreg1[p->index + 2] |= HCINTMSK_CHHLTD | HCINTMSK_XACTERR;
++                dwc2_update_hc_irq(s, p->index);
++            } else {
++                ep = usb_ep_get(dev, p->pid, p->epnum);
++                trace_usb_dwc2_work_bh_service(s->next_chan, chan, dev, p->epnum);
++                dwc2_handle_packet(s, p->devadr, dev, ep, p->index, true);
++            }
+             found = true;
+         }

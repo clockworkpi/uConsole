@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "steps": [
+    {"at_seconds": 180, "request": {"action": "status"}},
+    {"at_seconds": 180, "request": {"action": "capture"}},
+    {"at_seconds": 360, "request": {"action": "status"}},
+    {"at_seconds": 360, "request": {"action": "capture"}},
+    {"at_seconds": 600, "request": {"action": "status"}},
+    {"at_seconds": 600, "request": {"action": "capture"}}
+  ]
+}

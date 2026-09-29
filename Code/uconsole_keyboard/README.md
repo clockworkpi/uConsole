@@ -1,3 +1,56 @@
+## Command-line build
+
+From the repository root, run `make firmware` with Arduino CLI on PATH and
+the legacy `stm32duino:STM32F1` core installed. The resulting file is
+`build/firmware/uconsole_keyboard.ino.bin`. This target only compiles; it
+does not flash a device. `make flash-tool` separately builds the native
+serial reset helper into `build/upload-reset.elf` without overwriting the
+bundled binaries.
+
+The explicit board settings are Generic STM32F103R, STM32F103RB (20 KiB RAM,
+128 KiB flash), STM32duino bootloader, 48 MHz, smallest optimization:
+
+```sh
+arduino-cli compile \
+  --fqbn stm32duino:STM32F1:genericSTM32F103R:device_variant=STM32F103RB,upload_method=DFUUploadMethod,cpu_speed=speed_48mhz,opt=osstd \
+  --output-dir build/firmware Code/uconsole_keyboard
+```
+
+Check the MCU fitted to your keyboard before flashing; override `FQBN` for a
+different variant. The DFU selection links the application at `0x08002000`,
+after the existing bootloader. Compilation alone does not verify operation
+on the keyboard.
+
+### Linux ARM64 host
+
+The documented 2021.2.22 package does not provide an ARM64 `stm32tools`
+bundle, so Boards Manager installation fails on this host architecture.
+For compilation, manually extract the
+[2021.2.22 core archive](https://dan.drown.org/stm32duino/STM32F1-2021.2.22.zip)
+to `~/Arduino/hardware/stm32duino/STM32F1`, and extract Arduino's
+[ARM64 GCC 7-2018-q2 toolchain](https://downloads.arduino.cc/tools/gcc-arm-none-eabi-7-2018-q2-update-linuxarm64.tar.bz2)
+to a persistent location. Check SHA-256 before extracting:
+
+```text
+STM32F1-2021.2.22.zip:
+e0f489d3ee10ffce45a826396249add5fc4a3e6699c780dab70a3836586a7917
+gcc-arm-none-eabi-7-2018-q2-update-linuxarm64.tar.bz2:
+6fb5752fb4d11012bd0a1ceb93a19d0641ff7cf29d289b3e6b86b99768e66f76
+```
+
+Create `platform.local.txt` alongside that core's `platform.txt`, containing
+`compiler.path=/absolute/path/to/compiler/bin/` (including the trailing slash).
+The core archive includes the required USBComposite library. Arduino CLI
+may display its internal platform version as `0.1.2`; the archive version
+is `2021.2.22`. This supplies the compilation dependencies, not the missing
+ARM64 upload tools. Use the repository's separate flashing instructions
+when ready to test hardware.
+
+Verified on Linux ARM64 with Arduino CLI 1.5.2-rc.1 and GCC 7.2.1: 33,696
+bytes flash, 4,680 bytes RAM. Hardware execution remains unverified.
+
+## Original Arduino IDE setup
+
 Arduino 1.8.13
 
 http://dan.drown.org/stm32duino/package_STM32duino_index.json

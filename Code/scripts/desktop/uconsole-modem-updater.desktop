@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=uConsole Modem Updater
+Comment=Verify and update a uConsole SIM7600G22 modem
+Exec=/usr/bin/uconsole-modem-updater
+Icon=network-cellular
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=false

@@ -1,0 +1,287 @@
+--- a/hw/gpio/bcm2838_gpio.c
++++ b/hw/gpio/bcm2838_gpio.c
+@@ -74,6 +74,64 @@
+ #define BCM2838_FSEL_ALT2       6
+ #define BCM2838_FSEL_ALT3       7
+ 
++static void bcm2838_gpio_update_irq(BCM2838GpioState *s)
++{
++    uint32_t level[2] = { s->lev0, s->lev1 };
++    int bank;
++
++    for (bank = 0; bank < 2; bank++) {
++        s->events[bank] |= (level[bank] & s->detect[4 + bank]) |
++                          (~level[bank] & s->detect[6 + bank]);
++    }
++    qemu_set_irq(s->irq[0], !!(s->events[0] & 0x0fffffff));
++    qemu_set_irq(s->irq[1], !!((s->events[0] & 0xf0000000) |
++                              (s->events[1] & 0x00003fff)));
++    qemu_set_irq(s->irq[2], !!(s->events[1] & 0x03ffc000));
++    qemu_set_irq(s->irq[3], !!(s->events[0] | s->events[1]));
++}
++
++static void bcm2838_gpio_update_levels(BCM2838GpioState *s)
++{
++    uint32_t previous[2] = { s->lev0, s->lev1 };
++    uint32_t level[2] = { s->input[0], s->input[1] };
++    int pin, bank;
++
++    for (pin = 0; pin < BCM2838_GPIO_NUM; pin++) {
++        uint32_t bit = BIT(pin % 32);
++        bank = pin / 32;
++        if (s->fsel[pin] == BCM2838_FSEL_GPIO_OUT) {
++            level[bank] = (level[bank] & ~bit) | (s->latch[bank] & bit);
++            if ((s->driven[bank] ^ level[bank]) & bit) {
++                s->driven[bank] ^= bit;
++                qemu_set_irq(s->out[pin], !!(level[bank] & bit));
++            }
++        }
++    }
++    for (bank = 0; bank < 2; bank++) {
++        /* Digital edges only: synchronous clock/glitch filtering is absent. */
++        s->events[bank] |= (~previous[bank] & level[bank] &
++                           (s->detect[bank] | s->detect[8 + bank])) |
++                          (previous[bank] & ~level[bank] &
++                           (s->detect[2 + bank] | s->detect[10 + bank]));
++    }
++    s->lev0 = level[0];
++    s->lev1 = level[1];
++    bcm2838_gpio_update_irq(s);
++}
++
++static void bcm2838_gpio_input(void *opaque, int pin, int level)
++{
++    BCM2838GpioState *s = opaque;
++    uint32_t bit = BIT(pin % 32);
++
++    if (level) {
++        s->input[pin / 32] |= bit;
++    } else {
++        s->input[pin / 32] &= ~bit;
++    }
++    bcm2838_gpio_update_levels(s);
++}
++
+ static uint32_t gpfsel_get(BCM2838GpioState *s, uint8_t reg)
+ {
+     int i;
+@@ -124,48 +182,6 @@
+     }
+ }
+ 
+-static int gpfsel_is_out(BCM2838GpioState *s, int index)
+-{
+-    if (index >= 0 && index < BCM2838_GPIO_NUM) {
+-        return s->fsel[index] == 1;
+-    }
+-    return 0;
+-}
+-
+-static void gpset(BCM2838GpioState *s, uint32_t val, uint8_t start,
+-                  uint8_t count, uint32_t *lev)
+-{
+-    uint32_t changes = val & ~*lev;
+-    uint32_t cur = 1;
+-
+-    int i;
+-    for (i = 0; i < count; i++) {
+-        if ((changes & cur) && (gpfsel_is_out(s, start + i))) {
+-            qemu_set_irq(s->out[start + i], 1);
+-        }
+-        cur <<= 1;
+-    }
+-
+-    *lev |= val;
+-}
+-
+-static void gpclr(BCM2838GpioState *s, uint32_t val, uint8_t start,
+-                  uint8_t count, uint32_t *lev)
+-{
+-    uint32_t changes = val & *lev;
+-    uint32_t cur = 1;
+-
+-    int i;
+-    for (i = 0; i < count; i++) {
+-        if ((changes & cur) && (gpfsel_is_out(s, start + i))) {
+-            qemu_set_irq(s->out[start + i], 0);
+-        }
+-        cur <<= 1;
+-    }
+-
+-    *lev &= ~val;
+-}
+-
+ static uint64_t bcm2838_gpio_read(void *opaque, hwaddr offset, unsigned size)
+ {
+     BCM2838GpioState *s = (BCM2838GpioState *)opaque;
+@@ -198,6 +214,8 @@
+         break;
+     case GPEDS0:
+     case GPEDS1:
++        value = s->events[(offset - GPEDS0) / 4];
++        break;
+     case GPREN0:
+     case GPREN1:
+     case GPFEN0:
+@@ -210,9 +228,8 @@
+     case GPAREN1:
+     case GPAFEN0:
+     case GPAFEN1:
+-        /* Not implemented */
+-        qemu_log_mask(LOG_UNIMP, "%s: %s: not implemented for %"HWADDR_PRIx"\n",
+-                      TYPE_BCM2838_GPIO, __func__, offset);
++        value = s->detect[((offset - GPREN0) / 12) * 2 +
++                          ((offset - GPREN0) % 12) / 4];
+         break;
+     case GPIO_PUP_PDN_CNTRL_REG0:
+     case GPIO_PUP_PDN_CNTRL_REG1:
+@@ -243,18 +260,18 @@
+     case GPFSEL4:
+     case GPFSEL5:
+         gpfsel_set(s, offset / BYTES_IN_WORD, value);
++        bcm2838_gpio_update_levels(s);
+         break;
+     case GPSET0:
+-        gpset(s, value, 0, 32, &s->lev0);
+-        break;
+     case GPSET1:
+-        gpset(s, value, 32, 22, &s->lev1);
++        s->latch[(offset - GPSET0) / 4] |= value &
++            (offset == GPSET0 ? UINT32_MAX : 0x03ffffff);
++        bcm2838_gpio_update_levels(s);
+         break;
+     case GPCLR0:
+-        gpclr(s, value, 0, 32, &s->lev0);
+-        break;
+     case GPCLR1:
+-        gpclr(s, value, 32, 22, &s->lev1);
++        s->latch[(offset - GPCLR0) / 4] &= ~value;
++        bcm2838_gpio_update_levels(s);
+         break;
+     case GPLEV0:
+     case GPLEV1:
+@@ -266,6 +283,9 @@
+         break;
+     case GPEDS0:
+     case GPEDS1:
++        s->events[(offset - GPEDS0) / 4] &= ~value;
++        bcm2838_gpio_update_irq(s);
++        break;
+     case GPREN0:
+     case GPREN1:
+     case GPFEN0:
+@@ -278,9 +298,10 @@
+     case GPAREN1:
+     case GPAFEN0:
+     case GPAFEN1:
+-        /* Not implemented */
+-        qemu_log_mask(LOG_UNIMP, "%s: %s: not implemented for %"HWADDR_PRIx"\n",
+-                      TYPE_BCM2838_GPIO, __func__, offset);
++        s->detect[((offset - GPREN0) / 12) * 2 +
++                  ((offset - GPREN0) % 12) / 4] = value &
++            ((offset - GPREN0) % 12 == 0 ? UINT32_MAX : 0x03ffffff);
++        bcm2838_gpio_update_irq(s);
+         break;
+     case GPIO_PUP_PDN_CNTRL_REG0:
+     case GPIO_PUP_PDN_CNTRL_REG1:
+@@ -306,8 +327,12 @@
+     /* SDHCI is selected by default */
+     sdbus_reparent_card(&s->sdbus, s->sdbus_sdhci);
+ 
+-    s->lev0 = 0;
+-    s->lev1 = 0;
++    s->lev0 = s->input[0];
++    s->lev1 = s->input[1];
++    memset(s->latch, 0, sizeof(s->latch));
++    memset(s->events, 0, sizeof(s->events));
++    memset(s->detect, 0, sizeof(s->detect));
++    bcm2838_gpio_update_irq(s);
+ 
+     memset(s->fsel, 0, sizeof(s->fsel));
+ 
+@@ -321,12 +346,31 @@
+     .read = bcm2838_gpio_read,
+     .write = bcm2838_gpio_write,
+     .endianness = DEVICE_NATIVE_ENDIAN,
++    .valid.min_access_size = 4,
++    .valid.max_access_size = 4,
++    .impl.min_access_size = 4,
++    .impl.max_access_size = 4,
+ };
+ 
++static int bcm2838_gpio_post_load(void *opaque, int version_id)
++{
++    BCM2838GpioState *s = opaque;
++
++    if (version_id == 1) {
++        memset(s->events, 0, sizeof(s->events));
++        memset(s->detect, 0, sizeof(s->detect));
++        s->input[0] = s->latch[0] = s->lev0;
++        s->input[1] = s->latch[1] = s->lev1;
++    }
++    bcm2838_gpio_update_levels(s);
++    return 0;
++}
++
+ static const VMStateDescription vmstate_bcm2838_gpio = {
+     .name = "bcm2838_gpio",
+-    .version_id = 1,
++    .version_id = 2,
+     .minimum_version_id = 1,
++    .post_load = bcm2838_gpio_post_load,
+     .fields = (VMStateField[]) {
+         VMSTATE_UINT8_ARRAY(fsel, BCM2838GpioState, BCM2838_GPIO_NUM),
+         VMSTATE_UINT32(lev0, BCM2838GpioState),
+@@ -334,6 +378,10 @@
+         VMSTATE_UINT8(sd_fsel, BCM2838GpioState),
+         VMSTATE_UINT32_ARRAY(pup_cntrl_reg, BCM2838GpioState,
+                              GPIO_PUP_PDN_CNTRL_NUM),
++        VMSTATE_UINT32_ARRAY_V(input, BCM2838GpioState, 2, 2),
++        VMSTATE_UINT32_ARRAY_V(latch, BCM2838GpioState, 2, 2),
++        VMSTATE_UINT32_ARRAY_V(events, BCM2838GpioState, 2, 2),
++        VMSTATE_UINT32_ARRAY_V(detect, BCM2838GpioState, 12, 2),
+         VMSTATE_END_OF_LIST()
+     }
+ };
+@@ -350,6 +398,10 @@
+                           "bcm2838_gpio", BCM2838_GPIO_REGS_SIZE);
+     sysbus_init_mmio(sbd, &s->iomem);
+     qdev_init_gpio_out(dev, s->out, BCM2838_GPIO_NUM);
++    qdev_init_gpio_in(dev, bcm2838_gpio_input, BCM2838_GPIO_NUM);
++    for (int i = 0; i < 4; i++) {
++        sysbus_init_irq(sbd, &s->irq[i]);
++    }
+ }
+ 
+ static void bcm2838_gpio_realize(DeviceState *dev, Error **errp)
+--- a/include/hw/gpio/bcm2838_gpio.h
++++ b/include/hw/gpio/bcm2838_gpio.h
+@@ -37,6 +37,9 @@
+ 
+     uint8_t fsel[BCM2838_GPIO_NUM];
+     uint32_t lev0, lev1;
++    uint32_t input[2], latch[2], events[2], detect[12];
++    uint32_t driven[2]; /* Output callback cache, reconstructed after load. */
++    qemu_irq irq[4];
+     uint8_t sd_fsel;
+     qemu_irq out[BCM2838_GPIO_NUM];
+     uint32_t pup_cntrl_reg[GPIO_PUP_PDN_CNTRL_NUM];
+--- a/hw/arm/bcm2838.c
++++ b/hw/arm/bcm2838.c
+@@ -176,6 +176,16 @@
+                     qdev_get_gpio_in(gicdev, PPI(n, VIRTUAL_PMU_IRQ)));
+     }
+ 
++    /* I2C completion: VideoCore IRQ53 maps to SPI117. */
++    qdev_connect_gpio_out(DEVICE(&ps_base->orgated_i2c_irq), 0,
++                         qdev_get_gpio_in(gicdev, 117));
++
++    /* GPIO group interrupts: VideoCore IRQs 49..52 map to SPIs 113..116. */
++    for (int n = 0; n < 4; n++) {
++        sysbus_connect_irq(SYS_BUS_DEVICE(&s->peripherals.gpio), n,
++                           qdev_get_gpio_in(gicdev, 113 + n));
++    }
++
+     /* Connect UART0 to the interrupt controller */
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps_base->uart0), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_UART0));

@@ -1,0 +1,102 @@
+{
+  "LE20B04SIM7600G22": {
+    "archive_sha256": "83f152a590c23aabc3a3e63981fcf9f2c395db007cd77ab0cec21c873ac66a55",
+    "partitions": [
+      {
+        "partition": "aboot",
+        "file": "appsboot.mbn",
+        "sha256": "4f9fcd7d352bc5232f3fdaea21f98b07c503090e9cebc19bb165fbb31b2856d6"
+      },
+      {
+        "partition": "rpm",
+        "file": "rpm.mbn",
+        "sha256": "b5d0711cd56c121d4d2f26cc48d099c32e0a16de206d195be6d55b6fbf5643c3"
+      },
+      {
+        "partition": "sbl",
+        "file": "sbl1.mbn",
+        "sha256": "cbae7c4911e0514265447e4766640fa21e86d6a0a3ab06f8bcda6b9e7d6c8dbe"
+      },
+      {
+        "partition": "tz",
+        "file": "tz.mbn",
+        "sha256": "078ffc609e2fc795575d7274b75869844485b1761426fbeee0c2c89865a934b5"
+      },
+      {
+        "partition": "modem",
+        "file": "modem.img",
+        "sha256": "0e7e338073fdf97da69add7ee54182afd0b056f4217e8258eafbadc30457ae6e"
+      },
+      {
+        "partition": "boot",
+        "file": "boot.img",
+        "sha256": "d0b811c4d5e4b0dac38d428ed0ff3663a03df8970793c04fa7f608091d2fa982"
+      },
+      {
+        "partition": "system",
+        "file": "system.img",
+        "sha256": "0a272c4a918b16beaf08e6fed3dcf2a5a8f4ae23d8ae7d5e717d05c07115adb4"
+      },
+      {
+        "partition": "recovery",
+        "file": "recovery.img",
+        "sha256": "812f4ed6d28b02c64a7bbe0b80d50d0eae75f71c3cba06a523c6373efc5adeee"
+      },
+      {
+        "partition": "recoveryfs",
+        "file": "recoveryfs.img",
+        "sha256": "87a87065d03ae481bc4864d7a03f64bde2a5b20b2396243152d4c2fd561b63de"
+      }
+    ]
+  },
+  "LE20B06SIM7600G22": {
+    "archive_sha256": "1dd7529eda13af516c4bdfb26df057e7d1ffd5f4dc96676874f516df6ca9057d",
+    "partitions": [
+      {
+        "partition": "aboot",
+        "file": "appsboot.mbn",
+        "sha256": "7331bd90ce40c3984c3b455cec1871fdbf41134bd201283cf5993c52e639b439"
+      },
+      {
+        "partition": "rpm",
+        "file": "rpm.mbn",
+        "sha256": "b5d0711cd56c121d4d2f26cc48d099c32e0a16de206d195be6d55b6fbf5643c3"
+      },
+      {
+        "partition": "sbl",
+        "file": "sbl1.mbn",
+        "sha256": "cbae7c4911e0514265447e4766640fa21e86d6a0a3ab06f8bcda6b9e7d6c8dbe"
+      },
+      {
+        "partition": "tz",
+        "file": "tz.mbn",
+        "sha256": "078ffc609e2fc795575d7274b75869844485b1761426fbeee0c2c89865a934b5"
+      },
+      {
+        "partition": "modem",
+        "file": "modem.img",
+        "sha256": "544a30b56730fc19f4f653a00bec7dd7a9e95c0108567a034e69f8d20a6354a3"
+      },
+      {
+        "partition": "boot",
+        "file": "boot.img",
+        "sha256": "e986a658b425a13ac57729c87a7fde1285e0432dc0c2988e5d2d402438eb61b4"
+      },
+      {
+        "partition": "system",
+        "file": "system.img",
+        "sha256": "e436d57cd87ba5edd436f42989402b382888cc57d2eca12e52f5fa04583135c0"
+      },
+      {
+        "partition": "recovery",
+        "file": "recovery.img",
+        "sha256": "4d59d8025baae614cd86d2d6c557731365993fac1f151673a239f800643294d7"
+      },
+      {
+        "partition": "recoveryfs",
+        "file": "recoveryfs.img",
+        "sha256": "eacbc9c288eee7f01ed74be2e7e650a585ed7d62354e7d31a5c6058ab5d7aec2"
+      }
+    ]
+  }
+}

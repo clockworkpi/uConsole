@@ -12,6 +12,9 @@ permissions:
   contents: write
 jobs:
   publish-wiki:
+    # Forks do not inherit the upstream wiki repository. Publish only after
+    # these files reach the canonical repository's default branch.
+    if: github.repository == 'clockworkpi/uConsole'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

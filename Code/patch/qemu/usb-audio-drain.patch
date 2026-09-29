@@ -1,0 +1,41 @@
+From: uConsole Workbench contributors
+Subject: [PATCH] usb-audio: drain queued output before disabling the voice
+
+Selecting alternate setting zero stops incoming USB packets, but bytes
+already accepted into the device ring still need to reach the audio core.
+Keep the voice callback active until that ring is empty, then let the audio
+core drain its own pending samples. Do not block the USB control request.
+
+--- a/hw/usb/dev-audio.c
++++ b/hw/usb/dev-audio.c
+@@ -666,6 +666,9 @@ static void output_callback(void *opaque, int avail)
+ 
+         data = streambuf_get(&s->out.buf, &len);
+         if (!data) {
++            if (s->out.altset == ALTSET_OFF) {
++                AUD_set_active_out(s->out.voice, false);
++            }
+             return;
+         }
+ 
+@@ -684,7 +687,8 @@ static int usb_audio_set_output_altset(USBAudioState *s, int altset)
+ {
+     switch (altset) {
+     case ALTSET_OFF:
+-        AUD_set_active_out(s->out.voice, false);
++        s->out.altset = ALTSET_OFF;
++        output_callback(s, INT_MAX);
+         break;
+     case ALTSET_STEREO:
+     case ALTSET_51:
+@@ -701,7 +705,9 @@ static int usb_audio_set_output_altset(USBAudioState *s, int altset)
+     }
+ 
+     if (s->debug) {
+-        fprintf(stderr, "usb-audio: set interface %d\n", altset);
++        fprintf(stderr, "usb-audio: set interface %d, accepted=%" PRIu64
++                " submitted=%" PRIu64 " bytes\n", altset,
++                s->out.buf.prod, s->out.buf.cons);
+     }
+     s->out.altset = altset;
+     return 0;

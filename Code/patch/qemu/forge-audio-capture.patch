@@ -1,0 +1,205 @@
+From: uConsole Workbench contributors
+Subject: [PATCH] usb: add opt-in deterministic forge capture fixture
+
+A separate explicitly synthetic USB Audio 1.0 input for application tests.
+No host audio backend or microphone access. Default machine is unchanged.
+
+--- a/hw/usb/meson.build
++++ b/hw/usb/meson.build
+@@ -41,7 +41,8 @@
+ system_ss.add(when: 'CONFIG_USB_STORAGE_BOT', if_true: files('dev-storage-bot.c'))
+ system_ss.add(when: 'CONFIG_USB_STORAGE_CLASSIC', if_true: files('dev-storage-classic.c'))
+ system_ss.add(when: 'CONFIG_USB_STORAGE_UAS', if_true: files('dev-uas.c'))
+ system_ss.add(when: 'CONFIG_USB_AUDIO', if_true: files('dev-audio.c'))
++system_ss.add(when: 'CONFIG_USB_AUDIO', if_true: files('dev-forge-capture.c'))
+ system_ss.add(when: 'CONFIG_USB_SERIAL', if_true: files('dev-serial.c'))
+ system_ss.add(when: 'CONFIG_USB_NETWORK', if_true: files('dev-network.c'))
+ if host_os != 'windows'
+--- /dev/null
++++ b/hw/usb/dev-forge-capture.c
+@@ -0,0 +1,185 @@
++/* SPDX-License-Identifier: MIT */
++/* Deterministic USB Audio 1.0 capture fixture; never opens host audio.
++ * Descriptor structure follows QEMU's dev-audio.c. This is a forge test
++ * peripheral, not an emulation of the uConsole analog microphone path.
++ */
++#include "qemu/osdep.h"
++#include "qemu/module.h"
++#include "hw/usb.h"
++#include "migration/vmstate.h"
++#include "desc.h"
++#include "qom/object.h"
++
++#define TYPE_FORGE_CAPTURE "usb-forge-capture"
++OBJECT_DECLARE_SIMPLE_TYPE(ForgeCapture, FORGE_CAPTURE)
++
++struct ForgeCapture {
++    USBDevice parent_obj;
++    bool active;
++    uint32_t sample;
++};
++
++static const USBDescStrings strings = {
++    [1] = "uConsole Forge",
++    [2] = "Synthetic capture fixture (not a microphone)",
++    [3] = "forge-capture-1",
++};
++
++static const USBDescIface interfaces[] = {
++    {
++        .bInterfaceNumber = 0,
++        .bInterfaceClass = USB_CLASS_AUDIO,
++        .bInterfaceSubClass = USB_SUBCLASS_AUDIO_CONTROL,
++        .ndesc = 3,
++        .descs = (USBDescOther[]) {
++            { .data = (uint8_t[]) {
++                9, USB_DT_CS_INTERFACE, 1, 0, 1, 30, 0, 1, 1,
++            } },
++            /* Input terminal 1: stereo generic analog input. */
++            { .data = (uint8_t[]) {
++                12, USB_DT_CS_INTERFACE, 2, 1, 0, 2, 0, 2, 3, 0, 0, 0,
++            } },
++            /* Output terminal 2: USB streaming, sourced from terminal 1. */
++            { .data = (uint8_t[]) {
++                9, USB_DT_CS_INTERFACE, 3, 2, 1, 1, 0, 1, 0,
++            } },
++        },
++    }, {
++        .bInterfaceNumber = 1,
++        .bAlternateSetting = 0,
++        .bInterfaceClass = USB_CLASS_AUDIO,
++        .bInterfaceSubClass = USB_SUBCLASS_AUDIO_STREAMING,
++    }, {
++        .bInterfaceNumber = 1,
++        .bAlternateSetting = 1,
++        .bInterfaceClass = USB_CLASS_AUDIO,
++        .bInterfaceSubClass = USB_SUBCLASS_AUDIO_STREAMING,
++        .bNumEndpoints = 1,
++        .ndesc = 2,
++        .descs = (USBDescOther[]) {
++            { .data = (uint8_t[]) {
++                7, USB_DT_CS_INTERFACE, 1, 2, 0, 1, 0,
++            } },
++            /* Type I, stereo S16_LE, fixed 48 kHz. */
++            { .data = (uint8_t[]) {
++                11, USB_DT_CS_INTERFACE, 2, 1, 2, 2, 16, 1, 0x80, 0xbb, 0,
++            } },
++        },
++        .eps = (USBDescEndpoint[]) {
++            {
++                .bEndpointAddress = USB_DIR_IN | 1,
++                .bmAttributes = 0x0d, /* isochronous, synchronous */
++                .wMaxPacketSize = 192, /* 48 stereo frames per full-speed SOF */
++                .bInterval = 1,
++                .is_audio = 1,
++                .extra = (uint8_t[]) { 7, USB_DT_CS_ENDPOINT, 1, 0, 0, 0, 0 },
++            },
++        },
++    },
++};
++
++static const USBDescDevice device = {
++    .bcdUSB = 0x0100,
++    .bMaxPacketSize0 = 64,
++    .bNumConfigurations = 1,
++    .confs = (USBDescConfig[]) {
++        {
++            .bNumInterfaces = 2,
++            .bConfigurationValue = 1,
++            .bmAttributes = USB_CFG_ATT_ONE,
++            .bMaxPower = 25,
++            .nif = ARRAY_SIZE(interfaces),
++            .ifs = interfaces,
++        },
++    },
++};
++
++static const USBDesc descriptor = {
++    .id = {
++        .idVendor = 0x46f4, .idProduct = 0x0003, .bcdDevice = 0x0001,
++        .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3,
++    },
++    .full = &device,
++    .str = strings,
++};
++
++static void reset(USBDevice *dev)
++{
++    ForgeCapture *s = FORGE_CAPTURE(dev);
++    s->active = false;
++    s->sample = 0;
++}
++
++static void set_interface(USBDevice *dev, int iface, int old, int alt)
++{
++    ForgeCapture *s = FORGE_CAPTURE(dev);
++    if (iface == 1) {
++        s->active = alt == 1;
++        s->sample = 0;
++    }
++}
++
++static void control(USBDevice *dev, USBPacket *p, int request, int value,
++                    int index, int length, uint8_t *data)
++{
++    if (usb_desc_handle_control(dev, p, request, value, index, length, data) < 0) {
++        p->status = USB_RET_STALL;
++    }
++}
++
++static void data(USBDevice *dev, USBPacket *p)
++{
++    ForgeCapture *s = FORGE_CAPTURE(dev);
++    uint8_t packet[192];
++    if (!s->active || p->pid != USB_TOKEN_IN || p->ep->nr != 1 ||
++        p->iov.size < sizeof(packet)) {
++        p->status = USB_RET_STALL;
++        return;
++    }
++    for (unsigned i = 0; i < 48; i++) {
++        /* Stereo channels encode low/high halves of a 32-bit frame counter.
++         * This is diagnostic PCM, not a tone or host microphone signal. */
++        stl_le_p(packet + i * 4, s->sample++);
++    }
++    usb_packet_copy(p, packet, sizeof(packet));
++}
++
++static void realize(USBDevice *dev, Error **errp)
++{
++    dev->usb_desc = &descriptor;
++    usb_desc_create_serial(dev);
++    usb_desc_init(dev);
++    reset(dev);
++}
++
++static const VMStateDescription vmstate = {
++    .name = TYPE_FORGE_CAPTURE,
++    .unmigratable = 1,
++};
++
++static void class_init(ObjectClass *klass, const void *class_data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
++    dc->vmsd = &vmstate;
++    set_bit(DEVICE_CATEGORY_SOUND, dc->categories);
++    uc->product_desc = "Forge synthetic USB capture";
++    uc->realize = realize;
++    uc->handle_reset = reset;
++    uc->handle_control = control;
++    uc->handle_data = data;
++    uc->set_interface = set_interface;
++}
++
++static const TypeInfo type_info = {
++    .name = TYPE_FORGE_CAPTURE,
++    .parent = TYPE_USB_DEVICE,
++    .instance_size = sizeof(ForgeCapture),
++    .class_init = class_init,
++};
++
++static void register_types(void)
++{
++    type_register_static(&type_info);
++}
++type_init(register_types)

@@ -1,0 +1,41 @@
+BCM2835 I2C: terminate a rejected transfer instead of exposing phantom data
+
+The ClockworkPi kernel records ERR only after TA clears. A rejected address
+must not leave the byte transfer active and advertise readable phantom data.
+Complete both address and data NACKs, retaining ERR until guest W1C.
+
+--- a/hw/i2c/bcm2835_i2c.c
++++ b/hw/i2c/bcm2835_i2c.c
+@@ -46,6 +46,11 @@
+     if (s->c & BCM2835_I2C_C_INTD && s->s & BCM2835_I2C_S_DONE) {
+         do_interrupt = 1;
+     }
++    if ((s->s & BCM2835_I2C_S_ERR) &&
++        (s->c & (BCM2835_I2C_C_INTD | BCM2835_I2C_C_INTT |
++                 BCM2835_I2C_C_INTR))) {
++        do_interrupt = 1;
++    }
+     qemu_set_irq(s->irq, do_interrupt);
+ }
+ 
+@@ -54,7 +59,11 @@
+ {
+     int direction = s->c & BCM2835_I2C_C_READ;
+     if (i2c_start_transfer(s->bus, s->a, direction)) {
+-        s->s |= BCM2835_I2C_S_ERR;
++        i2c_end_transfer(s->bus);
++        s->s |= BCM2835_I2C_S_ERR | BCM2835_I2C_S_DONE;
++        s->s &= ~(BCM2835_I2C_S_TA | BCM2835_I2C_S_RXR |
++                  BCM2835_I2C_S_TXW | BCM2835_I2C_S_RXD);
++        return;
+     }
+     s->s |= BCM2835_I2C_S_TA;
+ 
+@@ -187,6 +196,7 @@
+                     s->dlen -= 1;
+                 } else {
+                     s->s |= BCM2835_I2C_S_ERR;
++                    bcm2835_i2c_finish_transfer(s);
+                 }
+             }
+ 

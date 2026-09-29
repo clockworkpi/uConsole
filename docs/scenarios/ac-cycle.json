@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "events": [
+    {"at_ms": 0, "power": {"ac_present": false}},
+    {"at_ms": 1000, "power": {"ac_present": true}}
+  ]
+}

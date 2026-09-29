@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "power": {
+    "ac_present": false,
+    "battery_present": true,
+    "battery_voltage_uv": 3300000,
+    "battery_capacity": 25,
+    "battery_current_ma": -250,
+    "power_key_pressed": false
+  }
+}

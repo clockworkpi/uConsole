@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "events": [
+    {"at_ms": 0, "power": {"adc_input_uv": 1650000}},
+    {"at_ms": 1000, "power": {"adc_powered": false}},
+    {"at_ms": 2000, "power": {"adc_powered": true}}
+  ]
+}

@@ -1,0 +1,12 @@
+--- a/usb_linux.c
++++ b/usb_linux.c
+@@ -207,0 +208 @@
++    int path_length;
+@@ -220 +221,2 @@
+-        sprintf(busname, "%s/%s", base, de->d_name);
++        path_length = snprintf(busname, sizeof(busname), "%s/%s", base, de->d_name);
++        if (path_length < 0 || (size_t)path_length >= sizeof(busname)) continue;
+@@ -228 +230,2 @@
+-            sprintf(devname, "%s/%s", busname, de->d_name);
++            path_length = snprintf(devname, sizeof(devname), "%s/%s", busname, de->d_name);
++            if (path_length < 0 || (size_t)path_length >= sizeof(devname)) continue;

@@ -1,0 +1,97 @@
+--- a/hw/usb/dev-network.c
++++ b/hw/usb/dev-network.c
+@@ -38,6 +38,7 @@
+ #include "qemu/module.h"
+ #include "qemu/cutils.h"
+ #include "qom/object.h"
++#include "usb-net-internal.h"
+ 
+ /*#define TRAFFIC_DEBUG*/
+ /* Thanks to NetChip Technologies for donating this product ID.
+@@ -475,14 +476,6 @@
+     le32 Reserved;
+ };
+ 
+-/* implementation specific */
+-enum rndis_state
+-{
+-    RNDIS_UNINITIALIZED,
+-    RNDIS_INITIALIZED,
+-    RNDIS_DATA_INITIALIZED,
+-};
+-
+ /* from ndis.h */
+ enum ndis_oid {
+     /* Required Object IDs (OIDs) */
+@@ -624,35 +617,6 @@
+     uint8_t buf[];
+ };
+ 
+-struct USBNetState {
+-    USBDevice dev;
+-
+-    enum rndis_state rndis_state;
+-    uint32_t medium;
+-    uint32_t speed;
+-    uint32_t media_state;
+-    uint16_t filter;
+-    uint32_t vendorid;
+-
+-    uint16_t connection;
+-
+-    unsigned int out_ptr;
+-    uint8_t out_buf[2048];
+-
+-    unsigned int in_ptr, in_len;
+-    uint8_t in_buf[2048];
+-
+-    USBEndpoint *intr;
+-    USBEndpoint *bulk_in;
+-
+-    char usbstring_mac[13];
+-    NICState *nic;
+-    NICConf conf;
+-    QTAILQ_HEAD(, rndis_response) rndis_resp;
+-};
+-
+-#define TYPE_USB_NET "usb-net"
+-OBJECT_DECLARE_SIMPLE_TYPE(USBNetState, USB_NET)
+ 
+ static int is_rndis(USBNetState *s)
+ {
+@@ -1059,7 +1023,17 @@
+ 
+ static void usb_net_handle_reset(USBDevice *dev)
+ {
++    USBNetState *s = USB_NET(dev);
++
++    rndis_clear_responsequeue(s);
++    s->rndis_state = RNDIS_UNINITIALIZED;
++    s->filter = 0;
++    s->out_ptr = 0;
++    s->in_ptr = 0;
++    s->in_len = 0;
++    memset(s->out_buf, 0, sizeof(s->out_buf));
++    memset(s->in_buf, 0, sizeof(s->in_buf));
+ }
+ 
+ static void usb_net_handle_control(USBDevice *dev, USBPacket *p,
+                int request, int value, int index, int length, uint8_t *data)
+@@ -1074,7 +1048,7 @@
+ 
+     switch(request) {
+     case ClassInterfaceOutRequest | USB_CDC_SEND_ENCAPSULATED_COMMAND:
+-        if (!is_rndis(s) || value || index != 0) {
++        if (!is_rndis(s) || value || index != s->control_iface) {
+             goto fail;
+         }
+ #ifdef TRAFFIC_DEBUG
+@@ -1097,7 +1071,7 @@
+         break;
+ 
+     case ClassInterfaceRequest | USB_CDC_GET_ENCAPSULATED_RESPONSE:
+-        if (!is_rndis(s) || value || index != 0) {
++        if (!is_rndis(s) || value || index != s->control_iface) {
+             goto fail;
+         }
+         p->actual_length = rndis_get_response(s, data);

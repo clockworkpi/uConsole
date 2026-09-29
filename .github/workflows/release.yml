@@ -1,0 +1,199 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      capture_public_desktop:
+        description: 'Record the public factory guest desktop on Linux x86_64 (not an automatic desktop pass)'
+        type: boolean
+        default: false
+      desktop_scenario:
+        description: 'Public disposable guest recording recipe; screenshots require review'
+        type: choice
+        options:
+          - capture
+          - onboarding
+        default: capture
+  pull_request:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host and GUI tests
+    uses: ./.github/workflows/emulator.yml
+
+  firmware:
+    name: Build keyboard firmware
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install STM32F1 core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://dan.drown.org/stm32duino/package_STM32duino_index.json
+          arduino-cli core update-index
+          arduino-cli core install stm32duino:STM32F1@2021.2.22
+      - name: Build firmware
+        run: make firmware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keyboard-firmware
+          path: |
+            build/firmware/uconsole_keyboard.ino.bin
+            build/firmware/provenance.json
+          if-no-files-found: error
+
+  packages:
+    name: Package ${{ matrix.target }}
+    needs: firmware
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: macos-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: keyboard-firmware
+          path: build/firmware
+      - name: Install native package qualification dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y python3-tk xvfb ninja-build pkg-config libglib2.0-dev libpixman-1-dev libslirp-dev libgtk-3-dev qemu-system-arm qemu-utils dosfstools e2fsprogs
+          else
+            brew install python-tk ninja pkg-config glib pixman libslirp qemu dosfstools e2fsprogs
+          fi
+      - name: Build and package uConsole Workbench
+        run: |
+          make package
+      - name: Test native helper and IDE package
+        run: |
+          if build/upload-reset.elf >/dev/null 2>&1; then
+            echo 'upload-reset unexpectedly accepted missing arguments' >&2
+            exit 1
+          fi
+          python3 -m unittest tests.test_keyboard_flash -v
+          test "$(find build -maxdepth 1 -name 'uconsole-workbench-*.tar.gz' | wc -l | tr -d ' ')" = 1
+      - name: Qualify extracted native archive and GUI
+        shell: bash
+        run: |
+          archive=build/uconsole-workbench-${{ matrix.target }}.tar.gz
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            xvfb-run -a python3 tools/validate_native_archive.py --archive "$archive" --output build/native-archive-validation --gui --preferred-python /usr/bin/python3
+          else
+            python3 tools/validate_native_archive.py --archive "$archive" --output build/native-archive-validation --gui --preferred-python /opt/homebrew/bin/python3
+          fi
+      - name: Build and test QEMU using only extracted package resources
+        shell: bash
+        run: |
+          resources="$GITHUB_WORKSPACE/build/native-archive-validation/uconsole-workbench/libexec/uconsole-workbench"
+          evidence="$GITHUB_WORKSPACE/build/native-archive-validation"
+          export UCONSOLE_BUILD_DIR="$RUNNER_TEMP/uconsole-package-qemu"
+          unset UCONSOLE_ROOT PYTHONPATH
+          cd "$RUNNER_TEMP"
+          python3 "$resources/tools/build_emulator_qemu.py" --jobs 4 > "$evidence/qemu-build.log" 2>&1
+          python3 "$resources/tools/build_emulator_qemu.py" --jobs 4 > "$evidence/qemu-rebuild.log" 2>&1
+          python3 "$resources/tools/test_emulator_watchdog.py" > "$evidence/watchdog.log" 2>&1
+          python3 "$resources/tools/test_emulator_pmic.py" > "$evidence/pmic.log" 2>&1
+          python3 "$resources/tools/test_emulator_adc_migration.py" > "$evidence/adc-migration.log" 2>&1
+      - name: Record public factory desktop on native x86_64
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_public_desktop && matrix.target == 'linux-x86_64'
+        timeout-minutes: 60
+        shell: bash
+        run: |
+          set -euo pipefail
+          resources="$GITHUB_WORKSPACE/build/native-archive-validation/uconsole-workbench/libexec/uconsole-workbench"
+          export UCONSOLE_BUILD_DIR="$RUNNER_TEMP/uconsole-package-qemu"
+          unset UCONSOLE_ROOT PYTHONPATH
+          factory="$RUNNER_TEMP/uConsole_CM4_v3.1_64bit.img.bz2"
+          workspace="$RUNNER_TEMP/public-factory-desktop"
+          evidence="$GITHUB_WORKSPACE/build/public-desktop-evidence"
+          mkdir -m 700 "$evidence"
+          # Diskless real-UART reproduction: synchronous QMP stalls when the
+          # host stops draining serial; the recorder worker must keep Tk live.
+          xvfb-run -a /usr/bin/python3 "$resources/tools/validate_desktop_serial_backpressure.py" --output "$evidence/serial-backpressure" > "$evidence/serial-backpressure.log" 2>&1
+          df -h "$RUNNER_TEMP"
+          # This manufacturer mirror is HTTP. The independently pinned SHA256
+          # is mandatory before any decompression or boot. Never use user images.
+          curl --fail --location --retry 2 --max-time 900 --output "$factory" http://dl.clockworkpi.com/uConsole_CM4_v3.1_64bit.img.bz2
+          printf '%s  %s\n' ef95242cdb0125e8ed08157400a26d4665acddd083481ec2314acd6e073b74ab "$factory" | sha256sum --check
+          cd "$RUNNER_TEMP"
+          /usr/bin/python3 "$resources/tools/uconsole_emulator.py" --workspace "$workspace" prepare "$factory" > "$evidence/prepare.log" 2>&1
+          /usr/bin/python3 "$resources/tools/uconsole_emulator.py" --workspace "$workspace" configure-display --timeout 600 > "$evidence/configure-display.log" 2>&1
+          case '${{ inputs.desktop_scenario }}' in
+            capture|'') recipe=factory-desktop-capture.json ;;
+            onboarding) recipe=factory-desktop-onboarding.json ;;
+            *) echo 'Unknown desktop scenario' >&2; exit 1 ;;
+          esac
+          scenario="$GITHUB_WORKSPACE/build/native-archive-validation/uconsole-workbench/share/doc/uconsole-workbench/scenarios/$recipe"
+          xvfb-run -a /usr/bin/python3 "$resources/tools/drive_forge_desktop.py" --workspace "$workspace" --scenario "$scenario" --output "$evidence/driver"
+      - name: Retain public desktop observations only
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.capture_public_desktop && matrix.target == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-desktop-linux-x86_64
+          # Explicit allowlist: no disks, account password fixture or user data.
+          path: |
+            build/public-desktop-evidence/**/*.log
+            build/public-desktop-evidence/driver/driver.json
+            build/public-desktop-evidence/serial-backpressure/acceptance.json
+            ${{ runner.temp }}/public-factory-desktop/desktop-record-*/screen-*.png
+            ${{ runner.temp }}/public-factory-desktop/desktop-record-*/record.json
+            ${{ runner.temp }}/public-factory-desktop/desktop-record-*/console.log
+            ${{ runner.temp }}/public-factory-desktop/serial.log
+            ${{ runner.temp }}/public-factory-desktop/workbench-qemu.log
+            ${{ runner.temp }}/public-factory-desktop/machine.json
+          if-no-files-found: error
+      - name: Retain package qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ matrix.target }}
+          path: |
+            build/native-archive-validation/native-archive-acceptance.json
+            build/native-archive-validation/*.log
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uconsole-workbench-${{ matrix.target }}
+          path: build/uconsole-workbench-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [packages, host-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: uconsole-workbench-*
+          path: dist
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum uconsole-workbench-*.tar.gz > SHA256SUMS
+      - name: Publish release and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create '${{ github.ref_name }}' dist/* --repo '${{ github.repository }}' --verify-tag --generate-notes --title '${{ github.ref_name }}'
