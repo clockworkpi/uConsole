@@ -14,7 +14,9 @@ coverage for every carrier device is tracked in the
 [full-device emulation plan](emulator-device-plan.md).
 
 The [Pi 4 UEFI checkpoint](emulator-pi4-uefi.md) records the isolated
-Daemonarchy firmware experiment, RNG200 fix and remaining PCIe blocker.
+Daemonarchy firmware experiment and its measured hardware-model gaps.
+The [manual SDHCI stop fix](emulator-sdhci-stop.md) covers the explicit CMD12
+completion defect exposed by firmware GPT reads.
 
 ## Research and adoption decision
 
