@@ -29,8 +29,10 @@ PATCHES = ['dummy-cpu-darwin-wakeup.patch', 'bcm2835-watchdog-timer.patch', 'ras
            'adc101c-reference-profile.patch', 'forge-modem.patch', 'usb-net-composite.patch',
            'forge-observation-counters.patch', 'bcm2838-rng200.patch', 'bcm2838-pcie-disconnected.patch', 'bcm2838-genet-disconnected.patch', 'sdhci-manual-cmd12.patch', 'sd-acmd22-wire-endian.patch',
            'bcm2838-pcie-connected.patch', 'bcm2835-framebuffer-bus-alias.patch',
-           'xhci-no-msix-migration.patch', 'xhci-compact-mmio.patch']
-MODEL_SOURCES = [('bcm2838_genet.c', 'hw/misc/bcm2838_genet.c'),
+           'xhci-no-msix-migration.patch', 'xhci-compact-mmio.patch', 'bcm2711-avs-thermal.patch']
+MODEL_SOURCES = [('bcm2711_avs_thermal.c', 'hw/misc/bcm2711_avs_thermal.c'),
+                 ('bcm2711_avs_thermal.h', 'include/hw/misc/bcm2711_avs_thermal.h'),
+                 ('bcm2838_genet.c', 'hw/misc/bcm2838_genet.c'),
                  ('bcm2838_genet.h', 'include/hw/misc/bcm2838_genet.h'),
                  ('bcm2838_pcie.c', 'hw/misc/bcm2838_pcie.c'),
                  ('bcm2838_pcie.h', 'include/hw/misc/bcm2838_pcie.h'),
