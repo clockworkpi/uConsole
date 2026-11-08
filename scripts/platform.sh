@@ -130,6 +130,8 @@ build_ide() {
     cp "$root/docs/emulator.md" "$root/docs/emulator-validation.md" \
         "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pcie-controller.md" \
         "$root/docs/emulator-genet-controller.md" \
+        "$root/docs/emulator-framebuffer-alias.md" \
+        "$root/docs/emulator-avs-thermal.md" \
         "$root/docs/emulator-sdhci-stop.md" \
         "$root/docs/emulator-device-plan.md" "$root/docs/forge-agents.md" \
         "$root/docs/keyboard-usb-contract.md" "$root/docs/workbench-demo-ideas.md" \

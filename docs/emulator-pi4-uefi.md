@@ -1,11 +1,11 @@
-# Pi 4 UEFI simulator checkpoint, 2026-11-07
+# Pi 4 UEFI simulator checkpoints, 2026-11-07–08
 
 This is a BCM2711/Pi 4 experiment using the existing partial `raspi4b`
 model. It does not emulate BCM2712, RP1 or Pi 5. Physical boards remain
 separate acceptance targets. No physical board needs to be restarted for this
 experiment.
 
-## Control and measured blockers
+## Initial control and measured blockers
 
 An isolated qcow2 overlay of the existing CM4 image booted Linux
 `6.12.62-v8+`, mounted its actual SD root filesystem and ran an interactive
@@ -28,7 +28,7 @@ The firmware and base image were unchanged between these tests:
 | With disconnected GENET controller profile | Reaches the firmware setup/boot prompt without either controller abort |
 | With secure GIC, EMMC2 card and manual SDHCI stop repair | Completes GPT/FAT reads and writes; a later Arasan MMC write encounters a translation fault on buffer `0x100003b6000` |
 
-These EDK2 runs have not reached the FreeBSD loader. The PCIe address is
+These initial EDK2 runs had not reached the FreeBSD loader. The PCIe address is
 `PCIE_REG_BASE + PCIE_RGR1_SW_INIT_1` in the
 [EDK2 BCM2711 definitions](https://github.com/tianocore/edk2-platforms/blob/08566230c98729eb9760211e3111c7b4c391ccbf/Silicon/Broadcom/Bcm27xx/Include/IndustryStandard/Bcm2711.h).
 The [host bridge constructor](https://github.com/tianocore/edk2-platforms/blob/08566230c98729eb9760211e3111c7b4c391ccbf/Silicon/Broadcom/Bcm27xx/Library/Bcm2711PciHostBridgeLib/Bcm2711PciHostBridgeLibConstructor.c)
@@ -58,8 +58,8 @@ instead of remaining expired. This profile follows the
 [TF-A RPi4 setup](https://github.com/ARM-software/arm-trusted-firmware/blob/v2.9/plat/rpi/rpi4/rpi4_bl31_setup.c),
 [TF-A Group1 initialization](https://github.com/ARM-software/arm-trusted-firmware/blob/v2.9/drivers/arm/gic/v2/gicv2_helpers.c)
 and [QEMU register aliases](https://github.com/qemu/qemu/blob/v10.2.4/hw/intc/arm_gic.c).
-Direct Linux/FDT boot keeps its existing GIC defaults. Further EDK2 console/SD
-handoff testing remains open; countdown progress is not an OS boot result.
+Direct Linux/FDT boot keeps its existing GIC defaults. Countdown progress alone is not an OS boot result; the later USB checkpoint
+below records the actual loader and kernel handoff.
 
 ## Firmware load contract
 
@@ -127,11 +127,10 @@ Offline readback preserves ten files; all 15 checks pass on this exact binary.
 The new BCM2712-compatible kernel also passes that Pi 4 control. Those runs
 keep the unsupported controller FDT nodes disabled and do not establish EDK2,
 Pi 5 or controller data-plane acceptance. See
-[the Daemonarchy record](https://github.com/jordanhubbard/daemonarchy/blob/work/pi-simulator-checkpoint/docs/testing-pi4-uboot-fdt-20261108.md).
+[the Daemonarchy record](https://github.com/jordanhubbard/daemonarchy/blob/main/docs/testing-pi4-uboot-fdt-20261108.md).
 
-See [emulator scope](emulator.md) for the other missing devices. EDK2's next
-step is a complete SD/console/loader handoff; silently skipping failed MMIO
-would hide unsupported hardware.
+See [emulator scope](emulator.md) for the other missing devices and the
+connected PCIe checkpoint below for the later loader handoff.
 
 ## SD transfer lifecycle repair
 
@@ -149,6 +148,43 @@ suites against the packaged emulator.
 EDK2 with this repair progresses through SD reads/writes but still does not
 reach the FreeBSD loader. A breakpoint at the first synchronous exception
 captures ESR_EL2 `0x96000004`, ELR_EL2 `0x391e83c8` in Arasan MMC write and
-FAR_EL2 `0x100003b6000`. Investigation is tracing the incoming buffer and its
-preservation across callbacks/interrupts. Mapping that invalid address or
-discarding the exception would not establish a valid firmware handoff.
+FAR_EL2 `0x100003b6000`. The subsequent ACMD22 endian repair fixes the cause: a native-endian block
+count was interpreted as a huge big-endian count, advancing the buffer by
+one TiB. Real one-, two- and 128-block controls cover the wire representation.
+No mapping for the invalid address is added.
+
+
+## Connected PCIe/USB and ACPI checkpoint
+
+The optional [connected PCIe profile](emulator-pcie-controller.md) now attaches
+the real QEMU xHCI engine, with programmed outbound windows, nonidentity DMA,
+INTx and migration. Select
+`-global bcm2838-pcie-disconnected.connected-xhci=on` and attach USB storage
+to `bcm-xhci.0`. Its compact 4 KiB controller layout fits the static EDK2 ACPI
+resource; generic QEMU xHCI retains its default 16 KiB layout. Independent
+command/event-ring tests cover both layouts and reject compact MSI-X.
+
+The [mailbox alias repair](emulator-framebuffer-alias.md) returns the GPU bus
+address expected by EDK2, so its subtraction resolves to the actual visible
+CPU framebuffer. QMP pixel checks cover both buffer request aliases and reset.
+
+A fresh native-built Daemonarchy ACPI/USB image with the same firmware now
+reaches the actual FreeBSD EFI loader, captures ACPI tables with four enabled
+CPUs and enters the kernel. The first native xHCI attachment exposed the ACPI
+resource mismatch above. The next boot passed it and faulted at the unmodeled
+BCM2711 AVS thermal register. Actual exception/page-table evidence resolved
+the address to `0xfd5d2200`; the [thermal model](emulator-avs-thermal.md)
+implements its calibrated read-only status without disabling the ACPI zone.
+
+QEMU SHA-256
+`bb335a6d852cf52385a5a46aced84fd1c6c98f329b4db937ec790bcd11ffe5b2`
+passes all eight model suites, 11 source-cache tests, the Linux control's
+10 checks and the FreeBSD FDT control's 15 checks. The Linux ARM64 native
+archive passes extracted GUI validation and all eight model suites against
+its exact extracted binary. All 1,861 host tests pass (one skipped).
+
+The third ACPI/USB cold boot passes the thermal read, enumerates native xHCI,
+USB mass storage and `da0`, then pauses after EFI RTC initial-time discovery.
+It has not saved init diagnostics or completed the required synchronized
+reset. Full ACPI/USB acceptance is still open. These simulator results do not
+qualify physical Pi 4, Pi 5/RP1, Ethernet, full RAM or the VideoCore boot chain.
