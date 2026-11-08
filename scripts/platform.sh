@@ -131,6 +131,7 @@ build_ide() {
         "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pi4-memory.md" \
         "$root/docs/emulator-pcie-controller.md" \
         "$root/docs/emulator-genet-controller.md" \
+        "$root/docs/emulator-genet-network.md" \
         "$root/docs/emulator-framebuffer-alias.md" \
         "$root/docs/emulator-avs-thermal.md" \
         "$root/docs/emulator-sdhci-stop.md" \
