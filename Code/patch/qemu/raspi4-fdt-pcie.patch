@@ -1,0 +1,13 @@
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -83,6 +83,10 @@
+         Raspi4bMachineState *s = RASPI4B_MACHINE(qdev_get_machine());
+         if (s->soc.peripherals.genet_network &&
+             !strcmp(dev_str, "brcm,bcm2711-genet-v5")) {
++            continue;
++        }
++        if (s->soc.peripherals.pcie.connected_xhci &&
++            !strcmp(dev_str, "brcm,bcm2711-pcie")) {
+             continue;
+         }
+ 

@@ -117,6 +117,8 @@ jobs:
           python3 "$resources/tools/test_emulator_rng200.py" > "$evidence/rng200.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie.py" > "$evidence/pcie.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie_xhci.py" > "$evidence/pcie-xhci.log" 2>&1
+          python3 "$resources/tools/test_emulator_pcie_fdt.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/pcie-fdt.log" 2>&1
+          python3 "$resources/tools/test_emulator_pi4_memory.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/pi4-memory-rebuilt.log" 2>&1
           python3 "$resources/tools/test_emulator_xhci_storage.py" > "$evidence/xhci-storage.log" 2>&1
           python3 "$resources/tools/test_emulator_genet.py" > "$evidence/genet.log" 2>&1
           python3 "$resources/tools/test_emulator_genet_network.py" --qemu-system "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/genet-network.log" 2>&1
@@ -135,7 +137,7 @@ jobs:
           cd "$RUNNER_TEMP"
           "$qemu" -object memory-backend-ram,help > "$evidence/ram-backend-properties.log" 2>&1
           python3 "$resources/tools/test_emulator_pi4_memory.py" --qemu "$qemu" --output "$evidence/pi4-memory" > "$evidence/pi4-memory.log" 2>&1
-          for suite in rng200 pcie pcie_xhci xhci_storage genet framebuffer_alias avs_thermal sdhci_stop sdhci_adma_stop; do
+          for suite in rng200 pcie pcie_xhci pcie_fdt xhci_storage genet framebuffer_alias avs_thermal sdhci_stop sdhci_adma_stop; do
             python3 "$resources/tools/test_emulator_$suite.py" --qemu "$qemu" > "$evidence/bundled-$suite.log" 2>&1
           done
           python3 "$resources/tools/test_emulator_genet_network.py" --qemu-system "$qemu" > "$evidence/bundled-genet-network.log" 2>&1

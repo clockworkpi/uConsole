@@ -90,6 +90,7 @@ check-emulator: keyboard-oracle
 	python3 tools/test_emulator_pcie.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_xhci_storage.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pcie_xhci.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
+	python3 tools/test_emulator_pcie_fdt.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pi4_memory.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_framebuffer_alias.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_avs_thermal.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'

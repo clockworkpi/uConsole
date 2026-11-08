@@ -29,7 +29,7 @@ PATCHES = ['dummy-cpu-darwin-wakeup.patch', 'bcm2835-watchdog-timer.patch', 'ras
            'adc101c-reference-profile.patch', 'forge-modem.patch', 'usb-net-composite.patch',
            'forge-observation-counters.patch', 'bcm2838-rng200.patch', 'bcm2838-pcie-disconnected.patch', 'bcm2838-genet-disconnected.patch', 'sdhci-manual-cmd12.patch', 'sd-acmd22-wire-endian.patch',
            'bcm2838-pcie-connected.patch', 'bcm2835-framebuffer-bus-alias.patch',
-           'xhci-no-msix-migration.patch', 'xhci-compact-mmio.patch', 'bcm2711-avs-thermal.patch', 'xhci-chained-ioc.patch', 'raspi4-memory-profiles.patch', 'bcm2838-genet-network.patch']
+           'xhci-no-msix-migration.patch', 'xhci-compact-mmio.patch', 'bcm2711-avs-thermal.patch', 'xhci-chained-ioc.patch', 'raspi4-memory-profiles.patch', 'bcm2838-genet-network.patch', 'raspi4-fdt-pcie.patch']
 MODEL_SOURCES = [('bcm2838_genet_net.c', 'hw/net/bcm2838_genet_net.c'),
                  ('bcm2838_genet_net.h', 'include/hw/net/bcm2838_genet_net.h'),
                  ('bcm2711_avs_thermal.c', 'hw/misc/bcm2711_avs_thermal.c'),

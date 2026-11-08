@@ -23,5 +23,7 @@ struct BCM2838PcieState {
     uint32_t regs[BCM2838_PCIE_NREGS];
     uint32_t reset, config_index;
     uint32_t status[2], mask[2];
+    uint32_t mdio_addr, mdio_write, mdio_read;
+    uint16_t mdio_bank, mdio_ssc_control;
 };
 #endif

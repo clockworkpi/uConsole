@@ -17,6 +17,7 @@
 #include "hw/qdev-properties.h"
 #include "hw/pci/pci_bridge.h"
 #include "hw/pci/pci_bus.h"
+#include "hw/pci/pcie_port.h"
 #include "hw/misc/bcm2838_pcie.h"
 #include "migration/vmstate.h"
 
@@ -129,6 +130,8 @@ static void clear_controller(BCM2838PcieState *s)
             s->regs[slot(0x4070 + n * 4)] = 0x0000fff0;
         }
     }
+    s->mdio_addr = s->mdio_write = s->mdio_read = 0;
+    s->mdio_bank = s->mdio_ssc_control = 0;
     memset(s->status, 0, sizeof(s->status));
     memset(s->intx_level, 0, sizeof(s->intx_level));
     s->config_index = 0;
@@ -183,6 +186,58 @@ static void config_write(BCM2838PcieState *s, hwaddr off, uint32_t value,
     }
 }
 
+/* The selected internal PHY profile implements the native SSC setup protocol.
+ * Register contract: U-Boot v2025.10/e50b1e8715011def8aff1588081a2649a2c6cd47
+ * drivers/pci/pcie_brcmstb.c:210-286 (GPL-2.0, Broadcom/Samsung/Nicolas Saenz
+ * Julienne), and its arch/arm/mach-bcm283x/include/mach/acpi/bcm2711.h.
+ * This is a stable simulated PLL/SSC state machine, not analog timing fidelity.
+ */
+#define MDIO_DONE (1U << 31)
+
+static bool mdio_clock_ready(BCM2838PcieState *s)
+{
+    return !(s->reset & BRIDGE_RESET) &&
+           !(reg(s, 0x4204) & (1U << 27));
+}
+
+static uint16_t mdio_phy_read(BCM2838PcieState *s)
+{
+    unsigned port = (s->mdio_addr >> 16) & 15;
+    unsigned address = s->mdio_addr & 0xffff;
+
+    if (port == 0 && address == 0x1f) {
+        return s->mdio_bank;
+    }
+    if (port == 0 && s->mdio_bank == 0x1100) {
+        if (address == 2) {
+            return s->mdio_ssc_control;
+        }
+        if (address == 1) {
+            bool clock = mdio_clock_ready(s);
+            return (clock ? 0x800 : 0) |
+                (clock && (s->mdio_ssc_control & 0xc000) == 0xc000 ? 0x400 : 0);
+        }
+    }
+    qemu_log_mask(LOG_UNIMP, "bcm2711-pcie: absent MDIO port/bank/register %u/%x/%x\n",
+                  port, s->mdio_bank, address);
+    return 0xffff;
+}
+
+static void mdio_phy_write(BCM2838PcieState *s, uint16_t value)
+{
+    unsigned port = (s->mdio_addr >> 16) & 15;
+    unsigned address = s->mdio_addr & 0xffff;
+
+    if (port == 0 && address == 0x1f) {
+        s->mdio_bank = value;
+    } else if (port == 0 && s->mdio_bank == 0x1100 && address == 2) {
+        s->mdio_ssc_control = value & 0xc000;
+    } else if (!(port == 0 && s->mdio_bank == 0x1100 && address == 1)) {
+        qemu_log_mask(LOG_UNIMP, "bcm2711-pcie: ignored MDIO write %u/%x/%x\n",
+                      port, s->mdio_bank, address);
+    }
+}
+
 static MemTxResult pcie_read(void *opaque, hwaddr off, uint64_t *data,
                              unsigned size, MemTxAttrs attrs)
 {
@@ -197,7 +252,10 @@ static MemTxResult pcie_read(void *opaque, hwaddr off, uint64_t *data,
         }
         return MEMTX_ERROR;
     }
-    if (off == SW_INIT) {
+    if (s->connected_xhci && off >= 0x1100 && off <= 0x1108) {
+        *data = off == 0x1100 ? s->mdio_addr :
+                off == 0x1104 ? s->mdio_write : s->mdio_read;
+    } else if (off == SW_INIT) {
         *data = s->reset;
     } else if (off == PORT_STATUS) {
         *data = 0x80 | (link_up(s) ? 0x30 : 0);
@@ -232,7 +290,22 @@ static MemTxResult pcie_write(void *opaque, hwaddr off, uint64_t value,
         }
         return MEMTX_ERROR;
     }
-    if (off == SW_INIT) {
+    if (s->connected_xhci && off >= 0x1100 && off <= 0x1108) {
+        if (off == 0x1100) {
+            s->mdio_addr = value;
+            s->mdio_read = 0;
+            if ((value >> 20) == 1 && mdio_clock_ready(s)) {
+                s->mdio_read = MDIO_DONE | mdio_phy_read(s);
+            }
+        } else if (off == 0x1104) {
+            s->mdio_write = value;
+            if ((value & MDIO_DONE) && (s->mdio_addr >> 20) == 0 &&
+                mdio_clock_ready(s)) {
+                mdio_phy_write(s, value);
+                s->mdio_write &= ~MDIO_DONE;
+            }
+        } /* Read-data is read-only. */
+    } else if (off == SW_INIT) {
         uint32_t old = s->reset;
         s->reset = value & (BRIDGE_RESET | PERST);
         if ((s->reset & BRIDGE_RESET) && !(old & BRIDGE_RESET)) {
@@ -327,7 +400,7 @@ static void pcie_realize(DeviceState *dev, Error **errp)
     s->parent_obj.bus->flags |= PCI_BUS_EXTENDED_CONFIG_SPACE;
     pci_setup_iommu(s->parent_obj.bus, &pcie_iommu_ops, s);
 
-    port = pci_new(PCI_DEVFN(0, 0), "pcie-root-port");
+    port = pci_new(PCI_DEVFN(0, 0), "bcm2711-pcie-root-port");
     object_property_add_child(OBJECT(s), "root-port", OBJECT(port));
     qdev_prop_set_uint8(DEVICE(port), "chassis", 1);
     qdev_prop_set_uint16(DEVICE(port), "slot", 0);
@@ -377,6 +450,33 @@ static int pcie_post_load(void *opaque, int version)
     return 0;
 }
 
+static bool mdio_needed(void *opaque)
+{
+    return ((BCM2838PcieState *)opaque)->connected_xhci;
+}
+
+static int mdio_post_load(void *opaque, int version)
+{
+    BCM2838PcieState *s = opaque;
+    return s->mdio_ssc_control & ~0xc000 ? -EINVAL : 0;
+}
+
+static const VMStateDescription vmstate_pcie_mdio = {
+    .name = TYPE_BCM2838_PCIE "/mdio",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = mdio_needed,
+    .post_load = mdio_post_load,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(mdio_addr, BCM2838PcieState),
+        VMSTATE_UINT32(mdio_write, BCM2838PcieState),
+        VMSTATE_UINT32(mdio_read, BCM2838PcieState),
+        VMSTATE_UINT16(mdio_bank, BCM2838PcieState),
+        VMSTATE_UINT16(mdio_ssc_control, BCM2838PcieState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_pcie = {
     .name = TYPE_BCM2838_PCIE, .version_id = 2, .minimum_version_id = 1,
     .pre_save = pcie_pre_save, .post_load = pcie_post_load,
@@ -391,6 +491,10 @@ static const VMStateDescription vmstate_pcie = {
         VMSTATE_BOOL_V(migration_connected, BCM2838PcieState, 2),
         VMSTATE_BOOL_ARRAY_V(intx_level, BCM2838PcieState, 4, 2),
         VMSTATE_END_OF_LIST()
+    },
+    .subsections = (const VMStateDescription * const[]) {
+        &vmstate_pcie_mdio,
+        NULL
     }
 };
 
@@ -431,6 +535,33 @@ static void pcie_class_init(ObjectClass *klass, const void *data)
     hc->root_bus_path = pcie_root_bus_path;
 }
 
+/* Broadcom's root-port PCIe capability lives at0xac, so its native link
+ * control/status DWORD is0xbc. Use the actual QEMU PCIe capability engine.
+ * Pattern: upstream QEMU7ae9ecd37fdb87bd193bdc1fdcf81f60e2dc7864,
+ * hw/arm/bcm2838_pcie.c, GPL-2.0-or-later,
+ * Copyright(C)2022 Ovchinnikov Vitalii <vitalii.ovchinnikov@auriga.com>.
+ * Keep QEMU PCI IDs and inherit the real bridge/slot/reset implementation.
+ */
+static void bcm2711_root_port_class_init(ObjectClass *klass, const void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIERootPortClass *rpc = PCIE_ROOT_PORT_CLASS(klass);
+    static VMStateDescription vmstate;
+
+    rpc->exp_offset = 0xac;
+    /* Distinguish this capability layout from the older generic-root-port
+     * stream. The disconnected controller's migration contract is unchanged. */
+    vmstate = *dc->vmsd;
+    vmstate.name = "bcm2711-pcie-root-port";
+    dc->vmsd = &vmstate;
+}
+
+static const TypeInfo bcm2711_root_port_info = {
+    .name = "bcm2711-pcie-root-port",
+    .parent = "pcie-root-port",
+    .class_init = bcm2711_root_port_class_init,
+};
+
 static const TypeInfo pcie_info = {
     .name = TYPE_BCM2838_PCIE, .parent = TYPE_PCI_HOST_BRIDGE,
     .instance_size = sizeof(BCM2838PcieState),
@@ -439,6 +570,7 @@ static const TypeInfo pcie_info = {
 
 static void pcie_register(void)
 {
+    type_register_static(&bcm2711_root_port_info);
     type_register_static(&pcie_info);
 }
 type_init(pcie_register)
