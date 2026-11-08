@@ -130,6 +130,7 @@ build_ide() {
     cp "$root/docs/emulator.md" "$root/docs/emulator-validation.md" \
         "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pi4-memory.md" \
         "$root/docs/emulator-pcie-controller.md" \
+        "$root/docs/emulator-pcie2-contract.md" \
         "$root/docs/emulator-genet-controller.md" \
         "$root/docs/emulator-genet-network.md" \
         "$root/docs/emulator-framebuffer-alias.md" \
