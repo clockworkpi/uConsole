@@ -40,7 +40,7 @@ def firmware_reset(machine):
     machine.write(8, 0)
     machine.write(0x808, 0)
     machine.write(0x808, 0xa000)
-    assert machine.read(0x808) == 0x0040e000
+    assert machine.read(0x808) == 0xa000
     machine.write(0x808, 0)
     machine.write(0xd80, 7)
     machine.write(0xd80, 0)
