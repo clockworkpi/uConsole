@@ -1,0 +1,33 @@
+--- a/hw/arm/bcm2838_peripherals.c
++++ b/hw/arm/bcm2838_peripherals.c
+@@ -81,11 +81,16 @@
+     memory_region_add_subregion(&s_base->peri_mr, RNG_OFFSET,
+                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->rng200), 0));
+ 
++    object_property_set_link(OBJECT(&s->pcie), "ram",
++        object_property_get_link(OBJECT(s_base), "ram", &error_abort),
++        &error_abort);
+     if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie), errp)) {
+         return;
+     }
+     memory_region_add_subregion(&s->peri_low_mr, 0x1500000,
+                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie), 0));
++    /* Transparent CPU container; programmed PCIe windows provide its leaves. */
++    sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->pcie), 1, 0, 1);
+ 
+     if (!sysbus_realize(SYS_BUS_DEVICE(&s->genet), errp)) {
+         return;
+--- a/hw/arm/bcm2838.c
++++ b/hw/arm/bcm2838.c
+@@ -200,6 +200,11 @@
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps->genet), 1,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_B));
+ 
++    for (int n = 0; n < 4; n++) {
++        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), n + 2,
++                           qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_PCI_INT_A + n));
++    }
++
+     /* Connect UART0 to the interrupt controller */
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps_base->uart0), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_UART0));
