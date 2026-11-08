@@ -119,6 +119,8 @@ jobs:
           python3 "$resources/tools/test_emulator_pcie_xhci.py" > "$evidence/pcie-xhci.log" 2>&1
           python3 "$resources/tools/test_emulator_xhci_storage.py" > "$evidence/xhci-storage.log" 2>&1
           python3 "$resources/tools/test_emulator_genet.py" > "$evidence/genet.log" 2>&1
+          python3 "$resources/tools/test_emulator_genet_network.py" --qemu-system "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/genet-network.log" 2>&1
+          python3 "$resources/tools/test_emulator_genet_tx_staging.py" --qemu-system "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/genet-tx-staging.log" 2>&1
           python3 "$resources/tools/test_emulator_framebuffer_alias.py" > "$evidence/framebuffer-alias.log" 2>&1
           python3 "$resources/tools/test_emulator_avs_thermal.py" > "$evidence/avs-thermal.log" 2>&1
           python3 "$resources/tools/test_emulator_sdhci_stop.py" > "$evidence/sdhci-stop.log" 2>&1
@@ -136,6 +138,8 @@ jobs:
           for suite in rng200 pcie pcie_xhci xhci_storage genet framebuffer_alias avs_thermal sdhci_stop sdhci_adma_stop; do
             python3 "$resources/tools/test_emulator_$suite.py" --qemu "$qemu" > "$evidence/bundled-$suite.log" 2>&1
           done
+          python3 "$resources/tools/test_emulator_genet_network.py" --qemu-system "$qemu" > "$evidence/bundled-genet-network.log" 2>&1
+          python3 "$resources/tools/test_emulator_genet_tx_staging.py" --qemu-system "$qemu" > "$evidence/bundled-genet-tx-staging.log" 2>&1
       - name: Record public factory desktop on native x86_64
         if: github.event_name == 'workflow_dispatch' && inputs.capture_public_desktop && matrix.target == 'linux-x86_64'
         timeout-minutes: 60
