@@ -114,6 +114,15 @@ jobs:
           python3 "$resources/tools/test_emulator_watchdog.py" > "$evidence/watchdog.log" 2>&1
           python3 "$resources/tools/test_emulator_pmic.py" > "$evidence/pmic.log" 2>&1
           python3 "$resources/tools/test_emulator_adc_migration.py" > "$evidence/adc-migration.log" 2>&1
+          python3 "$resources/tools/test_emulator_rng200.py" > "$evidence/rng200.log" 2>&1
+          python3 "$resources/tools/test_emulator_pcie.py" > "$evidence/pcie.log" 2>&1
+          python3 "$resources/tools/test_emulator_pcie_xhci.py" > "$evidence/pcie-xhci.log" 2>&1
+          python3 "$resources/tools/test_emulator_xhci_storage.py" > "$evidence/xhci-storage.log" 2>&1
+          python3 "$resources/tools/test_emulator_genet.py" > "$evidence/genet.log" 2>&1
+          python3 "$resources/tools/test_emulator_framebuffer_alias.py" > "$evidence/framebuffer-alias.log" 2>&1
+          python3 "$resources/tools/test_emulator_avs_thermal.py" > "$evidence/avs-thermal.log" 2>&1
+          python3 "$resources/tools/test_emulator_sdhci_stop.py" > "$evidence/sdhci-stop.log" 2>&1
+          python3 "$resources/tools/test_emulator_sdhci_adma_stop.py" > "$evidence/sdhci-dma-stop.log" 2>&1
       - name: Record public factory desktop on native x86_64
         if: github.event_name == 'workflow_dispatch' && inputs.capture_public_desktop && matrix.target == 'linux-x86_64'
         timeout-minutes: 60

@@ -13,6 +13,11 @@ The staged path from functional surrogates to driver- and hardware-level
 coverage for every carrier device is tracked in the
 [full-device emulation plan](emulator-device-plan.md).
 
+The [Pi 4 UEFI checkpoint](emulator-pi4-uefi.md) records the isolated
+Daemonarchy firmware experiment and its measured hardware-model gaps.
+The [manual SDHCI stop fix](emulator-sdhci-stop.md) covers the explicit CMD12
+completion defect exposed by firmware GPT reads.
+
 ## Research and adoption decision
 
 Research performed 2026-09-21:
@@ -67,6 +72,9 @@ optional modem uses GPIO power sequencing and USB data/control/fastboot.
 | Firmware GPIO expander | Stateful mailbox config/state for logical pins 128–135 | Electrical levels, externally driven inputs, board-specific reset defaults and dependent-device effects are not modeled |
 | Keyboard/trackball | QEMU USB keyboard and relative mouse over DWC2 | STM32F103 firmware, composite descriptors, Fn layers, joystick, LEDs, CDC and DFU |
 | Watchdog/power reset | Repository QEMU patch adds countdown/reload/cancel/expiry | Broader power-management register coverage |
+| RNG200 | Host-backed random words, enable/reset, counters, status and IRQ; migration tested | Oscillator, entropy health tests and timing; normal Linux DT fixture still disables this node |
+| PCIe controller | [Default disconnected port and optional real PCI bridge/xHCI](emulator-pcie-controller.md), programmed MMIO/DMA windows, INTx and migration | PHY timing, VL805-specific behavior and endpoint MSI; normal Linux DT fixture still disables this node |
+| GENET controller | [Disconnected PHY, MAC/reset/MDIO, IRQ and descriptor control profile](emulator-genet-controller.md) | No native RX/TX, descriptor consumption or guest-memory DMA; normal Linux DT fixture still disables this node |
 | Display | 1280×720 logical surrogate through QEMU's mailbox framebuffer; local GTK/SDL or loopback VNC | VC4/V3D, DSI, CWU50 panel and OCP8178 backlight; no panel-fidelity claim |
 | PMIC/battery | QEMU AXP221 at I2C address 0x34; Linux driver probes it | Regulators, battery state, ADC, charging and interrupt behavior |
 | Networking | Optional QEMU USB RNDIS adapter and user-mode NAT/SSH forwarding | Actual Wi-Fi/BT hardware and radio behavior; guest configuration still required |

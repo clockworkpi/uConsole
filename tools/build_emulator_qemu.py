@@ -27,8 +27,18 @@ PATCHES = ['dummy-cpu-darwin-wakeup.patch', 'bcm2835-watchdog-timer.patch', 'ras
            'bcm2835-firmware-gpio.patch', 'uconsole-keyboard.patch', 'usb-audio-drain.patch',
            'wav-backend-lifetime.patch', 'forge-audio-capture.patch', 'uconsole-adc101c.patch',
            'adc101c-reference-profile.patch', 'forge-modem.patch', 'usb-net-composite.patch',
-           'forge-observation-counters.patch']
-MODEL_SOURCES = [('adc101c-core.h', 'hw/adc/adc101c-core.h'),
+           'forge-observation-counters.patch', 'bcm2838-rng200.patch', 'bcm2838-pcie-disconnected.patch', 'bcm2838-genet-disconnected.patch', 'sdhci-manual-cmd12.patch', 'sd-acmd22-wire-endian.patch',
+           'bcm2838-pcie-connected.patch', 'bcm2835-framebuffer-bus-alias.patch',
+           'xhci-no-msix-migration.patch', 'xhci-compact-mmio.patch', 'bcm2711-avs-thermal.patch', 'xhci-chained-ioc.patch']
+MODEL_SOURCES = [('bcm2711_avs_thermal.c', 'hw/misc/bcm2711_avs_thermal.c'),
+                 ('bcm2711_avs_thermal.h', 'include/hw/misc/bcm2711_avs_thermal.h'),
+                 ('bcm2838_genet.c', 'hw/misc/bcm2838_genet.c'),
+                 ('bcm2838_genet.h', 'include/hw/misc/bcm2838_genet.h'),
+                 ('bcm2838_pcie.c', 'hw/misc/bcm2838_pcie.c'),
+                 ('bcm2838_pcie.h', 'include/hw/misc/bcm2838_pcie.h'),
+                 ('bcm2838_rng.c', 'hw/misc/bcm2838_rng.c'),
+                 ('bcm2838_rng.h', 'include/hw/misc/bcm2838_rng.h'),
+                 ('adc101c-core.h', 'hw/adc/adc101c-core.h'),
                  ('adc101c.c', 'hw/adc/adc101c.c'),
                  ('forge-modem.c', 'hw/usb/forge-modem.c'),
                  ('usb-net-internal.h', 'hw/usb/usb-net-internal.h')]

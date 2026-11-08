@@ -1,0 +1,23 @@
+--- a/hw/usb/hcd-xhci-pci.c
++++ b/hw/usb/hcd-xhci-pci.c
+@@ -110,11 +110,15 @@
+     PCIDevice *pci_dev = PCI_DEVICE(s);
+     int intr;
+ 
+-    for (intr = 0; intr < s->xhci.numintrs; intr++) {
+-        if (s->xhci.intr[intr].msix_used) {
+-            msix_vector_use(pci_dev, intr);
+-        } else {
+-            msix_vector_unuse(pci_dev, intr);
++    /* No vector table exists when the device was realized with msix=off.
++     * INTx/MSI state is restored by the PCI and xHCI VMState handlers. */
++    if (msix_present(pci_dev)) {
++        for (intr = 0; intr < s->xhci.numintrs; intr++) {
++            if (s->xhci.intr[intr].msix_used) {
++                msix_vector_use(pci_dev, intr);
++            } else {
++                msix_vector_unuse(pci_dev, intr);
++            }
+         }
+     }
+    return 0;

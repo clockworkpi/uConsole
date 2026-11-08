@@ -1,0 +1,53 @@
+--- a/include/hw/arm/bcm2838_peripherals.h
++++ b/include/hw/arm/bcm2838_peripherals.h
+@@ -15,6 +15,7 @@
+ #include "hw/misc/bcm2838_rng.h"
+ #include "hw/misc/bcm2838_pcie.h"
+ #include "hw/misc/bcm2838_genet.h"
++#include "hw/misc/bcm2711_avs_thermal.h"
+ 
+ /* SPI */
+ #define GIC_SPI_INTERRUPT_MBOX         33
+@@ -69,6 +70,7 @@
+     BCM2838RngState rng200;
+     BCM2838PcieState pcie;
+     BCM2838GenetState genet;
++    BCM2711AvsThermalState avs_thermal;
+     SDHCIState emmc2;
+     BCM2838GpioState gpio;
+ 
+--- a/hw/arm/bcm2838_peripherals.c
++++ b/hw/arm/bcm2838_peripherals.c
+@@ -35,6 +35,8 @@
+     object_initialize_child(obj, "rng200", &s->rng200, TYPE_BCM2838_RNG);
+     object_initialize_child(obj, "pcie", &s->pcie, TYPE_BCM2838_PCIE);
+     object_initialize_child(obj, "genet", &s->genet, TYPE_BCM2838_GENET);
++    object_initialize_child(obj, "avs-thermal", &s->avs_thermal,
++                            TYPE_BCM2711_AVS_THERMAL);
+ 
+     /* Extended Mass Media Controller 2 */
+     object_initialize_child(obj, "emmc2", &s->emmc2, TYPE_SYSBUS_SDHCI);
+@@ -97,6 +99,13 @@
+     }
+     memory_region_add_subregion(&s->peri_low_mr, 0x1580000,
+                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->genet), 0));
++
++    if (!sysbus_realize(SYS_BUS_DEVICE(&s->avs_thermal), errp)) {
++        return;
++    }
++    /* CPU 0xfd5d2200 / GPU 0x7d5d2200: AVS read-only temperature status. */
++    memory_region_add_subregion(&s->peri_low_mr, 0x15d2200,
++        sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->avs_thermal), 0));
+ 
+     /* Map lower peripherals into the GPU address space */
+     memory_region_init_alias(&s->peri_low_mr_alias, OBJECT(s),
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -90,6 +90,7 @@
+   'bcm2835_property.c',
+   'bcm2835_rng.c',
+   'bcm2838_rng.c',
++  'bcm2711_avs_thermal.c',
+   'bcm2838_pcie.c',
+   'bcm2838_genet.c',
+   'bcm2835_thermal.c',

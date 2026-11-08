@@ -39,7 +39,9 @@ def check_qemu_sources(resources):
     for entry in models:
         if (not isinstance(entry, (list, tuple)) or len(entry) != 2 or
                 not isinstance(entry[0], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*\.[ch]', entry[0]) or
-                not isinstance(entry[1], str) or not entry[1].startswith('hw/') or '..' in entry[1].split('/')):
+                not isinstance(entry[1], str) or
+                not re.fullmatch(r'(?:hw|include/hw)/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[ch]', entry[1]) or
+                any(part in ('.', '..') for part in entry[1].split('/'))):
             raise ValueError('Invalid packaged QEMU model source')
         names.append(entry[0])
     if len(names) != len(set(names)):

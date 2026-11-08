@@ -1,0 +1,16 @@
+--- a/hw/sd/sd.c
++++ b/hw/sd/sd.c
+@@ -2256,8 +2256,12 @@
+ /* ACMD22 */
+ static sd_rsp_type_t sd_acmd_SEND_NUM_WR_BLOCKS(SDState *sd, SDRequest req)
+ {
++    uint8_t written_blocks[sizeof(sd->blk_written)];
++
++    /* ACMD22 transfers a big-endian block count, not a host-native integer. */
++    stl_be_p(written_blocks, sd->blk_written);
+     return sd_cmd_to_sendingdata(sd, req, 0,
+-                                 &sd->blk_written, sizeof(sd->blk_written));
++                                 written_blocks, sizeof(written_blocks));
+ }
+ 
+ /* ACMD23 */

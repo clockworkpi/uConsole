@@ -11,6 +11,28 @@ import validate_native_archive as validation
 
 
 class NativeArchiveGuards(unittest.TestCase):
+    def test_public_qemu_headers_and_destination_guards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'tools').mkdir()
+            assets = root/'Code/patch/qemu'
+            assets.mkdir(parents=True)
+            (assets/'model.patch').write_text('patch')
+            (assets/'model.h').write_text('header')
+            builder = root/'tools/build_emulator_qemu.py'
+            for destination in ('hw/misc/model.h', 'include/hw/misc/model.h'):
+                builder.write_text("PATCHES = ['model.patch']\nMODEL_SOURCES = " +
+                                   repr([('model.h', destination)]) + '\n')
+                self.assertEqual(len(validation.check_qemu_sources(root)), 3)
+            for destination in ('/hw/model.h', 'include/hw/../model.h',
+                                'hw/./model.h', 'include/other/model.h',
+                                'hw/../../outside.h', 'hw//model.h',
+                                'hw/misc/model.h/extra', 'hw/misc\\model.h'):
+                builder.write_text("PATCHES = ['model.patch']\nMODEL_SOURCES = " +
+                                   repr([('model.h', destination)]) + '\n')
+                with self.subTest(destination=destination), self.assertRaisesRegex(ValueError, 'model source'):
+                    validation.check_qemu_sources(root)
+
     def test_all_packaged_builder_inputs_are_required(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

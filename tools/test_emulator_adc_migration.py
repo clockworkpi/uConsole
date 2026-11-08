@@ -36,6 +36,7 @@ class Machine:
             *(['-incoming', 'defer'] if incoming else [])], stdout=log, stderr=log)
         stack.callback(self.close)
         sock = stack.enter_context(connect(test, self.process))
+        self.sock = sock
         self.stream = stack.enter_context(sock.makefile('rwb', buffering=0))
 
     def close(self):
@@ -48,7 +49,7 @@ class Machine:
                 self.process.wait(timeout=5)
 
     def command(self, value):
-        self.stream.write((value + '\n').encode())
+        self.sock.sendall((value + '\n').encode())
         while True:
             reply = self.stream.readline().decode().strip()
             if reply.startswith('IRQ '):

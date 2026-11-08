@@ -1,0 +1,84 @@
+Subject: [PATCH] usb/xhci: optional compact standard register aperture
+
+Keep the generic 16KiB layout by default. Board profiles with a static
+4KiB ACPI resource may select compact-mmio and disabled MSI-X. All
+register banks retain the existing controller engine and advertised offsets.
+
+--- a/hw/usb/hcd-xhci.h
++++ b/hw/usb/hcd-xhci.h
+@@ -185,6 +185,7 @@
+     MemoryRegion mem_doorbell;
+ 
+     /* properties */
++    bool compact_mmio;
+     uint32_t numports_2;
+     uint32_t numports_3;
+     uint32_t numintrs;
+--- a/hw/usb/hcd-xhci.c
++++ b/hw/usb/hcd-xhci.c
+@@ -2763,10 +2763,10 @@
+         }
+         break;
+     case 0x14: /* DBOFF */
+-        ret = OFF_DOORBELL;
++        ret = xhci->compact_mmio ? 0xc00 : OFF_DOORBELL;
+         break;
+     case 0x18: /* RTSOFF */
+-        ret = OFF_RUNTIME;
++        ret = xhci->compact_mmio ? 0x800 : OFF_RUNTIME;
+         break;
+ 
+     /* extended capabilities */
+@@ -3413,20 +3413,24 @@
+     usb_xhci_init(xhci);
+     xhci->mfwrap_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, xhci_mfwrap_timer, xhci);
+ 
+-    memory_region_init(&xhci->mem, OBJECT(dev), "xhci", XHCI_LEN_REGS);
++    memory_region_init(&xhci->mem, OBJECT(dev), "xhci", xhci->compact_mmio ? 0x1000 : XHCI_LEN_REGS);
+     memory_region_init_io(&xhci->mem_cap, OBJECT(dev), &xhci_cap_ops, xhci,
+                           "capabilities", LEN_CAP);
+     memory_region_init_io(&xhci->mem_oper, OBJECT(dev), &xhci_oper_ops, xhci,
+                           "operational", 0x400);
+     memory_region_init_io(&xhci->mem_runtime, OBJECT(dev), &xhci_runtime_ops,
+-                           xhci, "runtime", LEN_RUNTIME);
++                           xhci, "runtime", xhci->compact_mmio ?
++                           (xhci->numintrs + 1) * 0x20 : LEN_RUNTIME);
+     memory_region_init_io(&xhci->mem_doorbell, OBJECT(dev), &xhci_doorbell_ops,
+-                           xhci, "doorbell", LEN_DOORBELL);
++                           xhci, "doorbell", xhci->compact_mmio ?
++                           (xhci->numslots + 1) * 4 : LEN_DOORBELL);
+ 
+     memory_region_add_subregion(&xhci->mem, 0,            &xhci->mem_cap);
+     memory_region_add_subregion(&xhci->mem, OFF_OPER,     &xhci->mem_oper);
+-    memory_region_add_subregion(&xhci->mem, OFF_RUNTIME,  &xhci->mem_runtime);
+-    memory_region_add_subregion(&xhci->mem, OFF_DOORBELL, &xhci->mem_doorbell);
++    memory_region_add_subregion(&xhci->mem, xhci->compact_mmio ? 0x800 : OFF_RUNTIME,
++                                &xhci->mem_runtime);
++    memory_region_add_subregion(&xhci->mem, xhci->compact_mmio ? 0xc00 : OFF_DOORBELL,
++                                &xhci->mem_doorbell);
+ 
+     for (i = 0; i < xhci->numports; i++) {
+         XHCIPort *port = &xhci->ports[i];
+@@ -3631,6 +3635,7 @@
+ };
+ 
+ static const Property xhci_properties[] = {
++    DEFINE_PROP_BOOL("compact-mmio", XHCIState, compact_mmio, false),
+     DEFINE_PROP_BIT("streams", XHCIState, flags,
+                     XHCI_FLAG_ENABLE_STREAMS, true),
+     DEFINE_PROP_UINT32("p2",    XHCIState, numports_2, 4),
+--- a/hw/usb/hcd-xhci-pci.c
++++ b/hw/usb/hcd-xhci-pci.c
+@@ -130,6 +130,12 @@
+     Error *err = NULL;
+     XHCIPciState *s = XHCI_PCI(dev);
+ 
++    /* The compact aperture has no room for the PCI MSI-X table/PBA. */
++    if (s->xhci.compact_mmio && s->msix != ON_OFF_AUTO_OFF) {
++        error_setg(errp, "compact-mmio requires msix=off");
++        return;
++    }
++
+     dev->config[PCI_CLASS_PROG] = 0x30;    /* xHCI */
+     dev->config[PCI_INTERRUPT_PIN] = 0x01; /* interrupt pin 1 */
+     dev->config[PCI_CACHE_LINE_SIZE] = 0x10;
