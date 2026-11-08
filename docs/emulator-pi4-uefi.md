@@ -26,6 +26,7 @@ The firmware and base image were unchanged between these tests:
 | With RNG200 model | UEFI proceeds past RNG initialization, then external abort on a read of PCIe reset register `0xfd509210`; ESR_EL2 `0x96000010`, ELR_EL2 `0x3969f4d4` |
 | With disconnected PCIe controller profile | Passes the PCIe reset/init sequence, then aborts reading GENET RBUF flush at `0xfd580008`; ESR_EL2 `0x96000010` |
 | With disconnected GENET controller profile | Reaches the firmware setup/boot prompt without either controller abort |
+| With secure GIC, EMMC2 card and manual SDHCI stop repair | Completes GPT/FAT reads and writes; a later Arasan MMC write encounters a translation fault on buffer `0x100003b6000` |
 
 These EDK2 runs have not reached the FreeBSD loader. The PCIe address is
 `PCIE_REG_BASE + PCIE_RGR1_SW_INIT_1` in the
@@ -70,7 +71,8 @@ The SD model requires a power-of-two virtual capacity. For example, with
 qemu-img create -f qcow2 -F raw -b /absolute/path/pi4-discovery-ready.img pi4-uefi.qcow2 512M
 qemu-system-aarch64 -machine raspi4b -accel tcg \
   -global arm_gic.has-security-extensions=on \
-  -drive if=sd,format=qcow2,file=pi4-uefi.qcow2 \
+  -drive if=none,id=sdcard,format=qcow2,file=pi4-uefi.qcow2 \
+  -device sd-card,bus=/generic-sdhci/sd-bus,drive=sdcard \
   -device loader,file=RPI_EFI.fd,addr=0,cpu-num=0,force-raw=on \
   -device loader,addr=0x1000,cpu-num=1 \
   -device loader,addr=0x1000,cpu-num=2 \
@@ -85,6 +87,8 @@ Run this in a new private directory with absolute paths to the patched QEMU
 binaries. `RPI_EFI.fd` is an armstub image linked at zero; QEMU's `-bios`
 loads it at the wrong address. Secondary CPUs enter its stub at `0x1000`.
 This bypasses the VideoCore/EEPROM boot chain; it does not test that chain.
+The explicit SD bus selects the pinned model's EMMC2 controller; its default
+`if=sd` attachment selects the older controller through the GPIO mux.
 Both UART logs matter. Preserve logs and a GDB exception-register snapshot
 before stopping a failed run through QMP. Do not infer firmware success from
 an empty UART log or a live QEMU process.
@@ -110,7 +114,7 @@ migration with reset asserted and deasserted passed. The 33 emulator host
 tests and 11 source-cache/extraction tests also passed. These checks do not
 close the PCIe blocker or native board acceptance.
 
-The final controller-model binary SHA-256 is
+The controller-only checkpoint binary SHA-256 is
 `cf65cb291e517a6a3db41bd3db5990006da003f7eb5d90fb66ae901be1f30eec`.
 RNG200, PCIe and GENET register/reset/IRQ and migration tests pass; GENET also
 has actual CPU controls proving reserved MMIO aborts and mapped MMIO succeeds.
@@ -128,3 +132,23 @@ Pi 5 or controller data-plane acceptance. See
 See [emulator scope](emulator.md) for the other missing devices. EDK2's next
 step is a complete SD/console/loader handoff; silently skipping failed MMIO
 would hide unsupported hardware.
+
+## SD transfer lifecycle repair
+
+The [SDHCI repair](emulator-sdhci-stop.md) fixes a separately reproduced
+manual-CMD12 host-busy defect, cancels aborted/reset ADMA callbacks and guards
+SDMA boundary continuation against stale transfers. Real PIO and four
+independent DMA baseline failures now pass. The exact binary is SHA-256
+`7fe73e7a5b2cf80a05ac373687b92682a728e0b2ce692045e76161c013d366d5`.
+It passes the full FreeBSD control (15 checks) and an interactive Linux
+`6.12.62-v8+` control (10 checks, four CPUs, 64-bit userspace, actual SD root,
+natural poweroff). Both base images remain unchanged. Its native package
+passes extracted-archive/GUI validation and all five model/SD regression
+suites against the packaged emulator.
+
+EDK2 with this repair progresses through SD reads/writes but still does not
+reach the FreeBSD loader. A breakpoint at the first synchronous exception
+captures ESR_EL2 `0x96000004`, ELR_EL2 `0x391e83c8` in Arasan MMC write and
+FAR_EL2 `0x100003b6000`. Investigation is tracing the incoming buffer and its
+preservation across callbacks/interrupts. Mapping that invalid address or
+discarding the exception would not establish a valid firmware handoff.
