@@ -77,7 +77,7 @@ def cpu_mmio_contract(binary):
                         stream = sock.makefile('rwb', buffering=0)
 
                         def command(text):
-                            stream.write((text + '\n').encode())
+                            sock.sendall((text + '\n').encode())
                             while True:
                                 result = stream.readline().decode().strip()
                                 if result.startswith('IRQ '):

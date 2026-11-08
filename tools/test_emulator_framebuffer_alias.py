@@ -38,7 +38,7 @@ def run(args, output):
                     stream = sock.makefile("rwb", buffering=0)
 
                     def command(text):
-                        stream.write((text + "\n").encode())
+                        sock.sendall((text + "\n").encode())
                         line = stream.readline().decode().strip()
                         assert line.startswith("OK"), line
                         return line
