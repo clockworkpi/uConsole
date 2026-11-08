@@ -15,6 +15,7 @@ import zlib
 
 from test_emulator_adc_migration import migrate
 from test_emulator_pmic import connect
+from test_emulator_pi4_memory import sparse_ram
 from uconsole_emulator import executable, qmp
 
 BASE = 0xfd580000
@@ -32,7 +33,8 @@ class Machine:
         network = (['-netdev', f'socket,id=wire,fd={peer.fileno()}',
                     '-global', 'bcm2838-genet.netdev=wire'] if backend else [])
         self.process = subprocess.Popen([
-            binary, '-M', 'raspi4b-8g', '-accel', 'qtest', '-S', '-display', 'none',
+            binary, '-M', 'raspi4b-8g,memory-backend=test-memory', *sparse_ram(8),
+            '-accel', 'qtest', '-S', '-display', 'none',
             '-serial', 'none', '-monitor', 'none', '-global',
             'bcm2838-peripherals.genet-network=on',
             *network, '-nic', 'none',
