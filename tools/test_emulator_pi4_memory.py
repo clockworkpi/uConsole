@@ -212,6 +212,8 @@ def high_dma(binary, root):
                              '-device', 'usb-storage,id=stick,bus=bcm-xhci.0,drive=disk'))
         m = machine('high-dma')
         configure(m)
+        # SCB0 memory geometry: ilog2(8GiB)-15=0x12, alongside access/UR bits.
+        m.reg(0x4008, 0x90003000)
         # Same captured Linux translation: PCI 16GiB -> ARM0, eight-GiB window.
         m.reg(0x4034, 0x12); m.reg(0x4038, 4)
         m.ram_offset = 4 * GIB
@@ -273,7 +275,8 @@ def dma_bounds(binary, root):
             board_name='raspi4b-8g,memory-backend=backing',
             device_args=('-object', f'memory-backend-file,id=backing,size=8G,mem-path={backing},share=on,reserve=off',
                          '-d', 'guest_errors'))
-        configure(m); m.reg(0x4034, 0x12); m.reg(0x4038, 4)
+        configure(m); m.reg(0x4008, 0x90003000)
+        m.reg(0x4034, 0x12); m.reg(0x4038, 4)
         m.ram_offset = 4 * GIB; m.dma_base = 20 * GIB
         for cpu_address in (0xfbffffc0, 0x100000000, 0x17fffffc0, 0x180000000, 0x1ffffffc0):
             rings(m)
