@@ -147,6 +147,27 @@ def run(binary):
                     stopped()
                     assert single(20) == payload
                     assert single(21) == pattern(21)
+                    # ACMD22 has a 32-bit big-endian wire payload, independent
+                    # of host byte order. The 128-block case is the firmware's
+                    # 64-KiB NVRAM flush; byte-swapping it fabricates a 1-TiB
+                    # buffer advance in its caller. Count only complete blocks.
+                    for count in (1, 2, 128):
+                        write(4, 512, 'w')
+                        card_cmd(25, 32 * 512, flags=0x3a, transfer=0x20)
+                        payload = pattern(123)
+                        for _ in range(count):
+                            for n in range(0, 512, 4):
+                                write(0x20, int.from_bytes(payload[n:n + 4], 'little'))
+                        write(0x20, 0x11223344)  # Partial next block must not count.
+                        card_cmd(12, flags=0xdb)
+                        stopped()
+                        card_cmd(55, rca)
+                        write(4, 4, 'w')
+                        card_cmd(22, flags=0x3a, transfer=0x10)
+                        wire = fifo(4)
+                        assert wire == count.to_bytes(4, 'big'), (count, wire.hex(), int.from_bytes(wire, 'big'))
+                        assert single(32 + count - 1) == payload
+                    print('PASS: ACMD22 wire-endian complete-write counts 1, 2 and 128')
                     # Command-only/non-abort CMD13 cannot clear an active data
                     # phase. DATA software reset must clear the interrupted host.
                     card_cmd(18, 24 * 512, flags=0x3a, transfer=0x30)

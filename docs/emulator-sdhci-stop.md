@@ -1,4 +1,4 @@
-# SDHCI manual CMD12 completion
+# SDHCI stop completion and SD write-count encoding
 
 The Pi 4 UEFI experiment exposed a controller-state defect after real SD reads.
 With the secure GIC firmware profile and the SD card attached to EMMC2, unchanged
@@ -83,3 +83,47 @@ The tested binary SHA-256 is
 `7fe73e7a5b2cf80a05ac373687b92682a728e0b2ce692045e76161c013d366d5`.
 Full FreeBSD and Linux guest regressions are recorded with their exact-artifact
 results; these focused controls alone do not establish an accepted boot profile.
+
+## Subsequent ACMD22 wire-encoding defect
+
+After the SDHCI repair, firmware completed its first 64 KiB NVRAM-file write
+and faulted while attempting the next write from `0x100003b6000`. Fresh
+hardware-breakpoint tracing showed that the first MMC write entered with
+buffer `0x3b6000`, and the pointer remained correct before and after every LED
+callback. The second write already entered with the invalid high address.
+The caller's remaining length was `0xffffff0000010000`, matching a 1 TiB
+subtraction rather than register or LED/mailbox corruption.
+
+The card model copied native-endian `blk_written` directly into ACMD22's data
+payload. After 128 completed blocks, a little-endian host supplied wire bytes
+`80 00 00 00`; the firmware correctly byte-swapped the received value and
+interpreted it as `0x80000000` blocks. Its subsequent multiply by 512 advanced
+the buffer by exactly `0x10000000000` bytes and underflowed the remaining
+length. The actual caller instructions (`REV`, `MUL`, buffer add) and the
+invalid incoming argument were captured before the fault.
+
+The [focused SD card patch](../Code/patch/qemu/sd-acmd22-wire-endian.patch)
+serializes the count as big-endian bytes before copying it into the card's
+transmit buffer. It does not change counters, firmware arithmetic, virtual
+mappings or guest register state. Linux's
+[ACMD22 consumer](https://github.com/torvalds/linux/blob/v6.12/drivers/mmc/core/block.c)
+also converts this four-byte network-order count with `ntohl`. The
+[pinned QEMU source](https://github.com/qemu/qemu/blob/v10.2.4/hw/sd/sd.c)
+is the baseline; this remains a local patch.
+
+The real-card PIO test now writes 1, 2 and 128 complete blocks, adds a partial
+next block, stops the transfer and reads ACMD22 through the controller. It
+checks the exact wire bytes, excludes the partial block from the count, and
+reads back the last completed block. Before the encoding fix, its first case
+observed `01 00 00 00` instead of `00 00 00 01`, independently reproducing the
+protocol defect without depending on firmware's exception handling.
+
+The encoding-fix build passed the exact wire-count cases (1, 2 and 128), the
+full PIO stop/write/reset suite, all four DMA lifecycle controls, GENET's actual
+CPU/MMIO/IRQ/migration controls, PCIe/RNG200 regressions and all 11 source-cache
+tests. Its Linux ARM64 QEMU binary SHA-256 is
+`9fa618ecfa9a630c659acc8123a463bfc8fa99f16c26c2373b203b69721d931b`.
+The unchanged-firmware retry reached the FreeBSD loader, saved and read-back
+verified its ACPI snapshot and raw-slot state, and began loading the kernel.
+That progress establishes removal of the NVRAM-write blocker; kernel/init and
+full distribution acceptance require their own subsequent records.
