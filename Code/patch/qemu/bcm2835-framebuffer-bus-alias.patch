@@ -1,0 +1,36 @@
+From: Frederik van Hövell
+Subject: [PATCH] hw/misc/bcm2835_property: return the framebuffer GPU bus alias
+
+Adapted to the pinned QEMU 10.2.4 headers from the author's QEMU-devel
+submission dated 2026-08-19:
+https://www.mail-archive.com/qemu-devel@nongnu.org/msg1217399.html
+
+The allocation property returns a VideoCore bus address. EDK2 subtracts
+0xc0000000 and Linux masks its upper alias bits to recover a CPU address.
+QEMU already maps this GPU bus alias; retain the internal framebuffer base
+and fix only the mailbox wire response.
+
+--- a/hw/misc/bcm2835_property.c
++++ b/hw/misc/bcm2835_property.c
+@@ -227,7 +227,8 @@
+         /* Frame buffer */
+ 
+         case RPI_FWREQ_FRAMEBUFFER_ALLOCATE:
+-            stl_le_phys(&s->dma_as, value + 12, fbconfig.base);
++            stl_le_phys(&s->dma_as, value + 12,
++                        fbconfig.base | BCM2836_DMA_DEVICE_OFFSET);
+             stl_le_phys(&s->dma_as, value + 16,
+                         bcm2835_fb_get_size(&fbconfig));
+             resplen = 8;
+--- a/include/hw/display/bcm2835_fb.h
++++ b/include/hw/display/bcm2835_fb.h
+@@ -15,7 +15,8 @@
+ #include "hw/sysbus.h"
+ #include "qom/object.h"
+ 
+-#define UPPER_RAM_BASE 0x40000000
++#define UPPER_RAM_BASE            0x40000000
++#define BCM2836_DMA_DEVICE_OFFSET 0xc0000000
+ 
+ #define TYPE_BCM2835_FB "bcm2835-fb"
+ OBJECT_DECLARE_SIMPLE_TYPE(BCM2835FBState, BCM2835_FB)
