@@ -436,7 +436,10 @@ struct BCM2838GenetNetState {
     qemu_irq irq_default;
     qemu_irq irq_prio;
 
-    uint8_t tx_packet[MAX_FRAME_SIZE];
+    uint8_t tx_packet[BCM2838_GENET_DMA_RING_CNT][MAX_FRAME_SIZE];
+    uint32_t tx_length[BCM2838_GENET_DMA_RING_CNT];
+    bool tx_active[BCM2838_GENET_DMA_RING_CNT];
+    uint8_t tx_status_size[BCM2838_GENET_DMA_RING_CNT];
     uint8_t rx_packet[MAX_FRAME_SIZE];
 };
 

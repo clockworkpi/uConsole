@@ -96,8 +96,40 @@ that exact binary. Source-cache safety tests also passed (11 cases). Local retai
 receipts are under `/home/jkh/daemonarchy-debug/genet-upstream-evaluation-20261108/`:
 `packets-build5.log`, `packets-build5/`, and `regressions-{0,1,2}.log`.
 
-The packet suite tests complete TX frames whose descriptors arrive in one producer
-update. Partial-frame staging across separate producer updates and migration of
-such an unfinished frame remain upstream limitations outside this profile's
-qualification. Hardware MIB counter fidelity, full PHY electrical/forced-mode
-behavior, jumbo RX, and RX checksum verification are also not qualified here.
+## TX assembly across producer updates
+
+`tools/test_emulator_genet_tx_staging.py` first reproduced the upstream failure on
+that baseline: a 114-byte frame split between producer updates emitted only its
+final 20 bytes. The correction keeps a bounded 4095-byte assembly buffer, length,
+active-SOP flag and captured status-block mode for each of the 17 rings. A consumed
+prefix survives reuse of its descriptor and original guest buffer. Only valid EOP
+emits a packet and raises packet completion; a new SOP abandons an unfinished
+frame. DMA failure, invalid ring geometry, overflow, explicit UMAC TX flush and
+controller reset clear assembly. An orphan continuation cannot splice stale bytes
+into another frame. Disabling DMA pauses assembly without treating it as a flush.
+
+VMState version 2 saves all assembly buffers and metadata and validates restored
+lengths/modes before use. Version 1 input loads empty assembly because the old model
+never saved its consumed prefix; an orphan tail is discarded until a fresh SOP,
+rather than fabricating unavailable data. Version 2 streams require a new model on
+the destination; the default disconnected profile retains its existing VMState.
+
+The staging fixture exercises separate doorbells, one-entry descriptor reuse,
+16-bit index rollover, interleaved rings, error/flush/reset recovery, a migrated
+unfinished frame after guest buffer reuse and changed global TBUF mode, and actual
+version 1-to-version 2 migration. It disables QEMU's generic post-migration RARP
+announcements (`announce-rounds=0`) so backend quiescence checks observe controller
+packets. An observed 60-byte EtherType 8035/opcode 3 RARP was retained separately; it
+was not a GENET premature packet.
+
+The new frozen candidate is generation
+`74ba689fc664ad57d826fc4b1339005befb42eb286fb6680506a0fa06c548065`,
+system binary SHA256
+`bb79102f8cdebdd0da7f0678507a9281f496934f1089d8b1ab4b7f8f20f85ca6`.
+Staging and existing packet/PHY suite receipts are `stg7-freeze.log` and
+`packets-build7.log` in the same local evidence directory. The baseline failure is
+`staging-before.log`; the unrelated RARP capture is `stg7-rarp.log`.
+
+Hardware MIB counter fidelity, full PHY electrical/forced-mode behavior, jumbo RX,
+and RX checksum verification remain outside qualification. Native OS acceptance
+and physical performance remain separate from these model controls.

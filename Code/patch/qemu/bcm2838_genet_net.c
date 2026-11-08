@@ -438,10 +438,9 @@ static uint64_t bcm2838_genet_make_u64(uint32_t hi, uint32_t lo)
     return ((uint64_t)hi << 32) | lo;
 }
 
-static void bcm2838_genet_xmit_packet(BCM2838GenetNetState *dev, void *packet,
-                                      size_t size)
+static bool bcm2838_genet_xmit_packet(BCM2838GenetNetState *dev, void *packet,
+                                      size_t size, size_t status_size)
 {
-    size_t status_size = (dev->regs.tbuf.ctrl & 1) ? sizeof(BCM2838GenetXmitStatus) : 0;
     uint8_t *buf = packet + status_size;
     size_t len;
     uint16_t len_type;
@@ -450,7 +449,7 @@ static void bcm2838_genet_xmit_packet(BCM2838GenetNetState *dev, void *packet,
     if (size < status_size + ETH_HLEN) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: TX frame too short (%zu bytes)\n", __func__, size);
-        return;
+        return false;
     }
 
     len = size - status_size;
@@ -462,11 +461,27 @@ static void bcm2838_genet_xmit_packet(BCM2838GenetNetState *dev, void *packet,
     }
 
     qemu_send_packet(qemu_get_queue(dev->nic), buf, len);
+    return true;
+}
+
+static void bcm2838_genet_tx_abort(BCM2838GenetNetState *s, unsigned ring)
+{
+    memset(s->tx_packet[ring], 0, sizeof(s->tx_packet[ring]));
+    s->tx_length[ring] = 0;
+    s->tx_active[ring] = false;
+    s->tx_status_size[ring] = 0;
+}
+
+static void bcm2838_genet_tx_flush(BCM2838GenetNetState *s)
+{
+    for (unsigned ring = 0; ring < BCM2838_GENET_DMA_RING_CNT; ring++) {
+        bcm2838_genet_tx_abort(s, ring);
+    }
 }
 
 static uint64_t bcm2838_genet_tx(BCM2838GenetNetState *s, unsigned int ring_index,
                                  uint32_t prod_index,
-                                 uint32_t cons_index)
+                                 uint32_t cons_index, bool *packet_done)
 {
     BCM2838GenetTdmaRing *ring = &s->regs.tdma.rings[ring_index];
     const unsigned int desc_size_words
@@ -483,7 +498,6 @@ static uint64_t bcm2838_genet_tx(BCM2838GenetNetState *s, unsigned int ring_inde
     uint64_t num_descs = 0;
     uint64_t read_ptr
         = bcm2838_genet_make_u64(ring->read_ptr_hi, ring->read_ptr);
-    size_t packet_off = 0;
 
     uint32_t prod_index_fld = FIELD_EX32(prod_index,
                                          GENET_DMA_PROD_INDEX, INDEX);
@@ -499,6 +513,7 @@ static uint64_t bcm2838_genet_tx(BCM2838GenetNetState *s, unsigned int ring_inde
         read_ptr % desc_size_words ||
         ((prod_index_fld - cons_index_fld) & 0xffff) >
             (ring_end_addr + 1 - ring_start_addr) / desc_size_words) {
+        bcm2838_genet_tx_abort(s, ring_index);
         qemu_log_mask(LOG_GUEST_ERROR, "GENET invalid TX ring geometry/index distance\n");
         return 0;
     }
@@ -518,38 +533,44 @@ static uint64_t bcm2838_genet_tx(BCM2838GenetNetState *s, unsigned int ring_inde
         trace_bcm2838_genet_tx(ring_index, desc_index, desc_status,
                                data_addr);
 
-        if (FIELD_EX32(desc_status, GENET_RDMA_LENGTH_STATUS, SOP) != 0) {
-            packet_off = 0;
+        if (FIELD_EX32(desc_status, GENET_RDMA_LENGTH_STATUS, SOP)) {
+            /* A new SOP explicitly abandons any earlier incomplete frame. */
+            bcm2838_genet_tx_abort(s, ring_index);
+            s->tx_active[ring_index] = true;
+            s->tx_status_size[ring_index] = (s->regs.tbuf.ctrl & 1) ?
+                sizeof(BCM2838GenetXmitStatus) : 0;
         }
-
+        if (!s->tx_active[ring_index]) {
+            qemu_log_mask(LOG_GUEST_ERROR, "GENET TX descriptor without SOP\n");
+            goto next_descriptor;
+        }
         buflength = FIELD_EX32(desc_status,
                                GENET_RDMA_LENGTH_STATUS, BUFLENGTH);
-
-        if (packet_off + buflength > sizeof(s->tx_packet)) {
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "%s: TX frame too big (%zu + %u bytes, max %zu)\n",
-                          __func__, packet_off, buflength,
-                          sizeof(s->tx_packet));
+        if (buflength > sizeof(s->tx_packet[ring_index]) -
+                        s->tx_length[ring_index]) {
+            qemu_log_mask(LOG_GUEST_ERROR, "GENET TX frame exceeds staging capacity\n");
+            bcm2838_genet_tx_abort(s, ring_index);
             break;
         }
-
         if (address_space_read(&s->dma_as, data_addr,
                                MEMTXATTRS_UNSPECIFIED,
-                               s->tx_packet + packet_off,
+                               s->tx_packet[ring_index] + s->tx_length[ring_index],
                                buflength) != MEMTX_OK) {
             qemu_log_mask(LOG_GUEST_ERROR,
                           "%s: failed to read TX buffer at 0x%" HWADDR_PRIx
                           "\n", __func__, data_addr);
+            bcm2838_genet_tx_abort(s, ring_index);
             break;
         }
-        packet_off += buflength;
-
-        if (FIELD_EX32(desc_status, GENET_RDMA_LENGTH_STATUS, EOP) != 0) {
-            bcm2838_genet_xmit_packet(s, s->tx_packet,
-                                      packet_off);
-            packet_off = 0;
+        s->tx_length[ring_index] += buflength;
+        if (FIELD_EX32(desc_status, GENET_RDMA_LENGTH_STATUS, EOP)) {
+            *packet_done |= bcm2838_genet_xmit_packet(s,
+                s->tx_packet[ring_index], s->tx_length[ring_index],
+                s->tx_status_size[ring_index]);
+            bcm2838_genet_tx_abort(s, ring_index);
         }
 
+next_descriptor:
         num_descs++;
         cons_index_fld = (cons_index_fld + 1) & 0xffff;
         s->regs.tdma.descs[desc_index].length_status =
@@ -596,6 +617,7 @@ static void bcm2838_genet_tdma_prod_index_write(BCM2838GenetNetState *s,
     uint32_t prod_index_fld = FIELD_EX32(prod_index,
                                          GENET_DMA_PROD_INDEX, INDEX);
     uint64_t num_descs_tx;
+    bool packet_done = false;
     uint32_t tx_intrs;
 
     if (cons_index_fld == prod_index_fld) {
@@ -604,13 +626,17 @@ static void bcm2838_genet_tdma_prod_index_write(BCM2838GenetNetState *s,
 
     trace_bcm2838_genet_tx_request(ring_index, prod_index_fld,
                                    cons_index_fld);
-    num_descs_tx = bcm2838_genet_tx(s, ring_index, prod_index, cons_index);
+    num_descs_tx = bcm2838_genet_tx(s, ring_index, prod_index, cons_index,
+                                    &packet_done);
     if (num_descs_tx == 0) {
         return;
     }
 
     ring->cons_index = FIELD_DP32(ring->cons_index, GENET_DMA_CONS_INDEX,
                                   INDEX, cons_index + num_descs_tx);
+    if (!packet_done) {
+        return;
+    }
 
     if (ring_index == BCM2838_GENET_DMA_RING_DEFAULT) {
         s->regs.intrl0.stat = FIELD_DP32(s->regs.intrl0.stat, GENET_INTRL_0,
@@ -758,6 +784,11 @@ static void bcm2838_genet_write(void *opaque, hwaddr offset, uint64_t value,
         break;
     case BCM2838_GENET_INTRL1_MASK_CLEAR:
         s->regs.intrl1.mask_status &= ~value;
+        break;
+    case BCM2838_GENET_UMAC_REG(tx_flush):
+        if (value & 1) {
+            bcm2838_genet_tx_flush(s);
+        }
         break;
     case BCM2838_GENET_UMAC_CMD:
         /* Complete SW reset as soon as it has been requested */
@@ -1089,6 +1120,7 @@ static void bcm2838_genet_reset(Object *obj, ResetType type)
     BCM2838GenetNetState *s = BCM2838_GENET_NET(obj);
 
     memset(&s->regs, 0x00, sizeof(s->regs));
+    bcm2838_genet_tx_flush(s);
 
     s->regs.sys.rev_ctrl = FIELD_DP32(s->regs.sys.rev_ctrl, GENET_SYS_REV_CTRL,
                                       MAJOR_REV, BCM2838_GENET_REV_MAJOR);
@@ -1116,6 +1148,19 @@ static const Property genet_properties[] = {
 static int bcm2838_genet_post_load(void *opaque, int version_id)
 {
     BCM2838GenetNetState *s = opaque;
+    if (version_id < 2) {
+        bcm2838_genet_tx_flush(s);
+    }
+    for (unsigned ring = 0; ring < BCM2838_GENET_DMA_RING_CNT; ring++) {
+        if (s->tx_length[ring] > sizeof(s->tx_packet[ring]) ||
+            (s->tx_status_size[ring] != 0 &&
+             s->tx_status_size[ring] != sizeof(BCM2838GenetXmitStatus)) ||
+            (!s->tx_active[ring] &&
+             (s->tx_length[ring] || s->tx_status_size[ring]))) {
+            error_report("GENET invalid migrated TX assembly state");
+            return -EINVAL;
+        }
+    }
     bcm2838_genet_set_irq_default(s);
     bcm2838_genet_set_irq_prio(s);
     return 0;
@@ -1123,7 +1168,7 @@ static int bcm2838_genet_post_load(void *opaque, int version_id)
 
 static const VMStateDescription vmstate_bcm2838_genet = {
     .name = "bcm2838-genet",
-    .version_id = 1,
+    .version_id = 2,
     .minimum_version_id = 1,
     .post_load = bcm2838_genet_post_load,
     .fields = (const VMStateField[]) {
@@ -1140,6 +1185,14 @@ static const VMStateDescription vmstate_bcm2838_genet = {
         VMSTATE_UINT16_2DARRAY(phy_exp_shd_regs.regs, BCM2838GenetNetState,
                                BCM2838_GENET_PHY_EXP_SHD_BLOCKS_CNT,
                                BCM2838_GENET_PHY_EXP_SHD_REGS_CNT),
+        VMSTATE_UINT8_2DARRAY_V(tx_packet, BCM2838GenetNetState,
+                               BCM2838_GENET_DMA_RING_CNT, MAX_FRAME_SIZE, 2),
+        VMSTATE_UINT32_ARRAY_V(tx_length, BCM2838GenetNetState,
+                              BCM2838_GENET_DMA_RING_CNT, 2),
+        VMSTATE_BOOL_ARRAY_V(tx_active, BCM2838GenetNetState,
+                            BCM2838_GENET_DMA_RING_CNT, 2),
+        VMSTATE_UINT8_ARRAY_V(tx_status_size, BCM2838GenetNetState,
+                             BCM2838_GENET_DMA_RING_CNT, 2),
         VMSTATE_END_OF_LIST()
     }
 };
