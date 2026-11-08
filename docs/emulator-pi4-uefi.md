@@ -206,3 +206,8 @@ reset. The original image hash is unchanged. No debugger was attached.
 The final Linux ARM64 package passes extracted archive/GUI validation and all
 nine model suites against that exact binary. Physical Pi 4, Pi 5/RP1, Ethernet,
 full RAM and the VideoCore/EEPROM chain remain separate acceptance targets.
+
+The separate [4/8 GiB memory profiles](emulator-pi4-memory.md) preserve the
+2 GiB default and exercise real high-memory CPU/device accesses and the
+firmware's 3 GiB limit. Their cap-off ACPI/USB path has a measured OS DMA
+reachability gate; that gate does not change the accepted 2 GiB result above.
