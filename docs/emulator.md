@@ -71,6 +71,7 @@ optional modem uses GPIO power sequencing and USB data/control/fastboot.
 | Keyboard/trackball | QEMU USB keyboard and relative mouse over DWC2 | STM32F103 firmware, composite descriptors, Fn layers, joystick, LEDs, CDC and DFU |
 | Watchdog/power reset | Repository QEMU patch adds countdown/reload/cancel/expiry | Broader power-management register coverage |
 | RNG200 | Host-backed random words, enable/reset, counters, status and IRQ; migration tested | Oscillator, entropy health tests and timing; normal Linux DT fixture still disables this node |
+| PCIe controller | [Disconnected-port reset, status, register and IRQ profile](emulator-pcie-controller.md); config reads remain absent | PCI bus, endpoints, xHCI, MMIO/DMA translation and PHY; normal Linux DT fixture still disables this node |
 | Display | 1280×720 logical surrogate through QEMU's mailbox framebuffer; local GTK/SDL or loopback VNC | VC4/V3D, DSI, CWU50 panel and OCP8178 backlight; no panel-fidelity claim |
 | PMIC/battery | QEMU AXP221 at I2C address 0x34; Linux driver probes it | Regulators, battery state, ADC, charging and interrupt behavior |
 | Networking | Optional QEMU USB RNDIS adapter and user-mode NAT/SSH forwarding | Actual Wi-Fi/BT hardware and radio behavior; guest configuration still required |

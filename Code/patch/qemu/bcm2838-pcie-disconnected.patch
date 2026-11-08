@@ -1,0 +1,66 @@
+--- a/include/hw/arm/bcm2838_peripherals.h
++++ b/include/hw/arm/bcm2838_peripherals.h
+@@ -13,6 +13,7 @@
+ #include "hw/sd/sdhci.h"
+ #include "hw/gpio/bcm2838_gpio.h"
+ #include "hw/misc/bcm2838_rng.h"
++#include "hw/misc/bcm2838_pcie.h"
+ 
+ /* SPI */
+ #define GIC_SPI_INTERRUPT_MBOX         33
+@@ -65,6 +66,7 @@
+     MemoryRegion mphi_mr_alias;
+ 
+     BCM2838RngState rng200;
++    BCM2838PcieState pcie;
+     SDHCIState emmc2;
+     BCM2838GpioState gpio;
+ 
+--- a/hw/arm/bcm2838_peripherals.c
++++ b/hw/arm/bcm2838_peripherals.c
+@@ -33,6 +33,7 @@
+     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->peri_low_mr);
+ 
+     object_initialize_child(obj, "rng200", &s->rng200, TYPE_BCM2838_RNG);
++    object_initialize_child(obj, "pcie", &s->pcie, TYPE_BCM2838_PCIE);
+ 
+     /* Extended Mass Media Controller 2 */
+     object_initialize_child(obj, "emmc2", &s->emmc2, TYPE_SYSBUS_SDHCI);
+@@ -78,6 +79,12 @@
+     }
+     memory_region_add_subregion(&s_base->peri_mr, RNG_OFFSET,
+                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->rng200), 0));
++
++    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie), errp)) {
++        return;
++    }
++    memory_region_add_subregion(&s->peri_low_mr, 0x1500000,
++                                sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie), 0));
+ 
+     /* Map lower peripherals into the GPU address space */
+     memory_region_init_alias(&s->peri_low_mr_alias, OBJECT(s),
+--- a/hw/arm/bcm2838.c
++++ b/hw/arm/bcm2838.c
+@@ -189,6 +189,12 @@
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps->rng200), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_RNG200));
+ 
++    /* PCIe controller and MSI banks (no downstream endpoint in this profile). */
++    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 0,
++                       qdev_get_gpio_in(gicdev, 147));
++    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 1,
++                       qdev_get_gpio_in(gicdev, 148));
++
+     /* Connect UART0 to the interrupt controller */
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps_base->uart0), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_UART0));
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -90,6 +90,7 @@
+   'bcm2835_property.c',
+   'bcm2835_rng.c',
+   'bcm2838_rng.c',
++  'bcm2838_pcie.c',
+   'bcm2835_thermal.c',
+   'bcm2835_cprman.c',
+   'bcm2835_powermgt.c',

@@ -27,8 +27,10 @@ PATCHES = ['dummy-cpu-darwin-wakeup.patch', 'bcm2835-watchdog-timer.patch', 'ras
            'bcm2835-firmware-gpio.patch', 'uconsole-keyboard.patch', 'usb-audio-drain.patch',
            'wav-backend-lifetime.patch', 'forge-audio-capture.patch', 'uconsole-adc101c.patch',
            'adc101c-reference-profile.patch', 'forge-modem.patch', 'usb-net-composite.patch',
-           'forge-observation-counters.patch', 'bcm2838-rng200.patch']
-MODEL_SOURCES = [('bcm2838_rng.c', 'hw/misc/bcm2838_rng.c'),
+           'forge-observation-counters.patch', 'bcm2838-rng200.patch', 'bcm2838-pcie-disconnected.patch']
+MODEL_SOURCES = [('bcm2838_pcie.c', 'hw/misc/bcm2838_pcie.c'),
+                 ('bcm2838_pcie.h', 'include/hw/misc/bcm2838_pcie.h'),
+                 ('bcm2838_rng.c', 'hw/misc/bcm2838_rng.c'),
                  ('bcm2838_rng.h', 'include/hw/misc/bcm2838_rng.h'),
                  ('adc101c-core.h', 'hw/adc/adc101c-core.h'),
                  ('adc101c.c', 'hw/adc/adc101c.c'),
