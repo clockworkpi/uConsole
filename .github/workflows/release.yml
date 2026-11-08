@@ -205,6 +205,8 @@ jobs:
             build/native-archive-validation/pi4-memory/result.json
             build/native-archive-validation/pi4-memory/migration-registers.json
             build/native-archive-validation/pi4-memory/*.log
+            build/native-archive-validation/pcie2-contract-*/**/*.log
+            build/native-archive-validation/pcie2-contract-*/**/result.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:

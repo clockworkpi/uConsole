@@ -28,7 +28,10 @@ CPU=0xff842000
 
 class ContractMachine(Machine):
     def __init__(self,root,name,stack,binary,incoming=False,accel='qtest'):
-        self.monitor=root/(name+'-qmp');test=root/(name+'-qtest')
+        # Evidence paths can exceed AF_UNIX limits on both hosted Linux and
+        # macOS. Keep sockets in a private short directory, not under --output.
+        self.socket_root=Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='p2-',dir='/tmp')))
+        self.monitor=self.socket_root/'qmp';test=self.socket_root/'qtest'
         log=stack.enter_context((root/(name+'.log')).open('wb'))
         self.process=subprocess.Popen([binary,'-M','raspi4b-pcie2-contract,memory-backend=test-memory','-global',
             'bcm2838-peripherals.pcie2-contract=on','-accel',accel,'-S',
@@ -175,7 +178,7 @@ def run(binary,root):
         acknowledge(m,2);m.write(MIP+0x40,0)
         noop(m,2) # pending real MSI and event migrate, then complete another command
         target=ContractMachine(root,'target',stack,binary,incoming=True)
-        migrate(m,target,root)
+        migrate(m,target,m.socket_root)
         target.oper=m.oper;target.runtime=m.runtime;target.doorbell=m.doorbell
         assert target.irq();eoi(target);acknowledge(target,3);noop(target,3);eoi(target);acknowledge(target,4)
         # GPIO RUN/bridge/PERST gates must stop real MMIO and DMA.
@@ -199,7 +202,7 @@ def cpu_fault_contract(binary):
     # mrs x3,esr_el3; mrs x4,far_el3; mov x5,#0x4000;
     # str x4,[x5,#8]; str x3,[x5]; wfi; b .-4
     for offset, fault, half in ((0x20,False,False),(4,True,False),(0x20,True,True)):
-        with tempfile.TemporaryDirectory(prefix='uc-pcie2-cpu-') as temporary:
+        with tempfile.TemporaryDirectory(prefix='uc-pcie2-cpu-',dir='/tmp') as temporary:
             root = Path(temporary)
             with (root / 'qemu.log').open('wb') as log:
                 process = subprocess.Popen([
