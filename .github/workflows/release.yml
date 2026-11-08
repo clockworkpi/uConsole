@@ -131,6 +131,7 @@ jobs:
           qemu="$resources/emulator/bin/qemu-system-aarch64"
           unset UCONSOLE_ROOT PYTHONPATH
           cd "$RUNNER_TEMP"
+          "$qemu" -object memory-backend-ram,help > "$evidence/ram-backend-properties.log" 2>&1
           python3 "$resources/tools/test_emulator_pi4_memory.py" --qemu "$qemu" --output "$evidence/pi4-memory" > "$evidence/pi4-memory.log" 2>&1
           for suite in rng200 pcie pcie_xhci xhci_storage genet framebuffer_alias avs_thermal sdhci_stop sdhci_adma_stop; do
             python3 "$resources/tools/test_emulator_$suite.py" --qemu "$qemu" > "$evidence/bundled-$suite.log" 2>&1
@@ -193,6 +194,7 @@ jobs:
             build/native-archive-validation/*.log
             build/native-archive-validation/pi4-memory/result.json
             build/native-archive-validation/pi4-memory/migration-registers.json
+            build/native-archive-validation/pi4-memory/*.log
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:

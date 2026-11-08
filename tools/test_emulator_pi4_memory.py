@@ -10,6 +10,7 @@ import hashlib
 from pathlib import Path
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -24,10 +25,15 @@ PROFILES = [('raspi4b', 2, 0xb03115), ('raspi4b-4g', 4, 0xc03115),
 
 
 
+def reserve_option():
+    # QEMU exposes this host swap-reservation property only on Linux.
+    return ',reserve=off' if sys.platform.startswith('linux') else ''
+
+
 def sparse_ram(capacity):
     # Capacity is real, but untouched pages need no host swap reservation.
     # Two eight-GiB migration peers must also run on small CI workers.
-    return ('-object', f'memory-backend-ram,id=test-memory,size={capacity}G,reserve=off')
+    return ('-object', f'memory-backend-ram,id=test-memory,size={capacity}G{reserve_option()}')
 
 
 def request(m, tag, values):
@@ -273,7 +279,7 @@ def dma_bounds(binary, root):
     with ExitStack() as stack:
         m = Machine(root, 'dma-bounds', stack, binary,
             board_name='raspi4b-8g,memory-backend=backing',
-            device_args=('-object', f'memory-backend-file,id=backing,size=8G,mem-path={backing},share=on,reserve=off',
+            device_args=('-object', f'memory-backend-file,id=backing,size=8G,mem-path={backing},share=on{reserve_option()}',
                          '-d', 'guest_errors'))
         configure(m); m.reg(0x4008, 0x90003000)
         m.reg(0x4034, 0x12); m.reg(0x4038, 4)

@@ -44,7 +44,11 @@ class Machine:
             '-qmp', f'unix:{self.monitor},server=on,wait=off',
             *(['-incoming', 'defer'] if incoming else [])], stdout=log, stderr=log)
         stack.callback(self.close)
-        sock = stack.enter_context(connect(test, self.process))
+        try:
+            sock = stack.enter_context(connect(test, self.process))
+        except (OSError, RuntimeError, TimeoutError) as error:
+            raise RuntimeError(f'{error}\nQEMU stderr:\n' +
+                               Path(log.name).read_text(errors='replace')[-4096:]) from error
         self.sock = sock
         self.stream = stack.enter_context(sock.makefile('rwb', buffering=0))
         self.dma_base = self.ram_offset

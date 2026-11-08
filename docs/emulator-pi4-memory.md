@@ -71,9 +71,11 @@ same stream passed when only the target window was provisioned beforehand;
 the repaired fixture requires a fresh, unconfigured target and rejects a
 host-controller error. Existing NoOp-only migration did not cover this case.
 
-The test RAM backends explicitly select `reserve=off`, preserving their full
-capacity while avoiding a 16 GiB host swap reservation for two migration
-peers on small CI runners. The normal board profiles keep QEMU defaults.
+On Linux, the test RAM backends select `reserve=off`, preserving full capacity
+while avoiding a 16 GiB host swap reservation for two migration
+peers on small CI runners. QEMU does not expose that property on Darwin;
+the same full-capacity tests use its native allocation defaults there.
+The normal board profiles keep QEMU defaults.
 The extracted Linux ARM64 archive ran the full memory fixture with sampled
 combined process RSS of 140.3 MiB; zero-page migration did not materialize
 8 GiB of resident RAM. The release workflow runs the same packaged fixture
