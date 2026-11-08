@@ -88,6 +88,7 @@ check-emulator: keyboard-oracle
 	python3 tools/test_emulator_gic.py
 	python3 tools/test_emulator_rng200.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pcie.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
+	python3 tools/test_emulator_xhci_storage.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pcie_xhci.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_framebuffer_alias.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_avs_thermal.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'

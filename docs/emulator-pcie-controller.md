@@ -104,3 +104,40 @@ passed on the same binary, as did all 11 source-cache tests. A complete Linux
 control reached an interactive four-CPU, 64-bit ext4 root and powered down
 naturally, preserving its original base image. These controls do not establish
 completion of the separate ACPI USB bootstrap experiment.
+
+## Chained USB storage completion repair
+
+The first ACPI USB run with thermal status available mounted the UFS root, then
+waited on a large read of the kernel's CTF data. An observer run eventually
+continued after five READ(10) retries and an I/O error; that run is disqualified
+as clean storage acceptance. Typed kernel inspection found a 128 KiB bulk-IN
+transfer whose first 64 KiB completion had arrived while the second was missing.
+The timer advanced normally and no interrupt remained pending.
+
+An independent `virt`/`qemu-xhci`/`usb-storage` fixture reproduces the defect
+without the Broadcom controller. It checks the complete 128 KiB payload against
+a patterned disk: all bytes arrive, but QEMU reports only the first IOC-bearing
+TRB in the chain. A transfer-wide `reported` latch suppresses the final event.
+The focused patch permits another ordinary successful IOC event while retaining
+the previous terminal-short suppression and error return. This follows the
+per-TRB completion contract in [Intel xHCI sections 4.10.1 and 4.11.7](https://www.intel.ie/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
+It does not claim to repair every pre-existing compound short-transfer or
+later-error attribution case.
+
+```sh
+python3 tools/test_emulator_xhci_storage.py --qemu build/emulator/qemu-build/qemu-system-aarch64
+```
+
+The storage test covers actual 64/128 KiB reads, a single final IOC, two chained
+IOCs, terminal-short behavior, successful Event Data pointers and byte counts,
+an actual USB transport STALL, and migration with pending completion interrupts
+followed by another disk read. `--expect-missing-ioc` requires the unfixed
+baseline failure instead of accepting it as normal behavior. The separate clean
+ACPI USB boot must also reject CAM retries and filesystem I/O errors; reaching
+init after a failed optional kernel read is insufficient.
+
+The storage fix passed these controls on QEMU binary SHA-256
+`c392d7c5b3a56f7afc01887a679e878c40953b0da0fde9dc0fd2edda4d31740d`.
+All eight prior model suites and 11 source-cache tests also passed. The same
+storage fixture independently requires the missing final event on the immutable
+pre-fix `bb335a6d…` baseline while verifying its complete disk payload.
