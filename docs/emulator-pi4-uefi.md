@@ -24,13 +24,41 @@ The firmware and base image were unchanged between these tests:
 | --- | --- |
 | Existing patched QEMU | UEFI synchronous external abort on a write to RNG200 threshold `0xfe104010`; ESR_EL2 `0x96000050` |
 | With RNG200 model | UEFI proceeds past RNG initialization, then external abort on a read of PCIe reset register `0xfd509210`; ESR_EL2 `0x96000010`, ELR_EL2 `0x3969f4d4` |
+| With disconnected PCIe controller profile | Passes the PCIe reset/init sequence, then aborts reading GENET RBUF flush at `0xfd580008`; ESR_EL2 `0x96000010` |
+| With disconnected GENET controller profile | Reaches the firmware setup/boot prompt without either controller abort |
 
-Neither run reaches the FreeBSD loader. The second address is
+These EDK2 runs have not reached the FreeBSD loader. The PCIe address is
 `PCIE_REG_BASE + PCIE_RGR1_SW_INIT_1` in the
 [EDK2 BCM2711 definitions](https://github.com/tianocore/edk2-platforms/blob/08566230c98729eb9760211e3111c7b4c391ccbf/Silicon/Broadcom/Bcm27xx/Include/IndustryStandard/Bcm2711.h).
 The [host bridge constructor](https://github.com/tianocore/edk2-platforms/blob/08566230c98729eb9760211e3111c7b4c391ccbf/Silicon/Broadcom/Bcm27xx/Library/Bcm2711PciHostBridgeLib/Bcm2711PciHostBridgeLibConstructor.c)
-reads it while resetting the controller. PCIe is absent from this QEMU model.
-These are measured simulator gaps, not demonstrated FreeBSD defects.
+reads it while resetting the controller. The new
+[PCIe](emulator-pcie-controller.md) and [GENET](emulator-genet-controller.md)
+profiles implement control/reset/interrupt state with disconnected links;
+they do not implement endpoint or network data planes. These were measured
+simulator gaps, not demonstrated FreeBSD defects.
+
+## Secure firmware interrupt profile
+
+TF-A v2.9 initializes interrupts as nonsecure Group1 before entering UEFI.
+QEMU's default Pi 4 GIC has security extensions disabled. A register snapshot
+at the stalled boot prompt showed the timer expired and unmasked, PPI 30
+pending/enabled, all PPIs in Group1, but only Group0 enabled at both GIC
+interfaces; HPPIR reported 1022. The default model interprets UEFI's nonsecure
+control writes without the security-bank aliases TF-A expects.
+
+For this firmware experiment select:
+
+```sh
+-global arm_gic.has-security-extensions=on
+```
+
+The unchanged firmware then advances its boot countdown; its timer is serviced
+instead of remaining expired. This profile follows the
+[TF-A RPi4 setup](https://github.com/ARM-software/arm-trusted-firmware/blob/v2.9/plat/rpi/rpi4/rpi4_bl31_setup.c),
+[TF-A Group1 initialization](https://github.com/ARM-software/arm-trusted-firmware/blob/v2.9/drivers/arm/gic/v2/gicv2_helpers.c)
+and [QEMU register aliases](https://github.com/qemu/qemu/blob/v10.2.4/hw/intc/arm_gic.c).
+Direct Linux/FDT boot keeps its existing GIC defaults. Further EDK2 console/SD
+handoff testing remains open; countdown progress is not an OS boot result.
 
 ## Firmware load contract
 
@@ -41,6 +69,7 @@ The SD model requires a power-of-two virtual capacity. For example, with
 ```sh
 qemu-img create -f qcow2 -F raw -b /absolute/path/pi4-discovery-ready.img pi4-uefi.qcow2 512M
 qemu-system-aarch64 -machine raspi4b -accel tcg \
+  -global arm_gic.has-security-extensions=on \
   -drive if=sd,format=qcow2,file=pi4-uefi.qcow2 \
   -device loader,file=RPI_EFI.fd,addr=0,cpu-num=0,force-raw=on \
   -device loader,addr=0x1000,cpu-num=1 \
@@ -81,6 +110,21 @@ migration with reset asserted and deasserted passed. The 33 emulator host
 tests and 11 source-cache/extraction tests also passed. These checks do not
 close the PCIe blocker or native board acceptance.
 
-See [emulator scope](emulator.md) for the other missing devices. The next UEFI
-step requires an explicit PCIe model or a separately identified firmware
-profile; silently skipping failed MMIO would hide the unsupported hardware.
+The final controller-model binary SHA-256 is
+`cf65cb291e517a6a3db41bd3db5990006da003f7eb5d90fb66ae901be1f30eec`.
+RNG200, PCIe and GENET register/reset/IRQ and migration tests pass; GENET also
+has actual CPU controls proving reserved MMIO aborts and mapped MMIO succeeds.
+The Linux ARM64 native package built and passed extracted-archive/GUI
+validation, and all three suites passed against its extracted emulator binary.
+
+A separate Daemonarchy U-Boot/FDT profile boots FreeBSD with four active CPUs,
+native SD root, init, seven completed diagnostic probes and synchronized reset.
+Offline readback preserves ten files; all 15 checks pass on this exact binary.
+The new BCM2712-compatible kernel also passes that Pi 4 control. Those runs
+keep the unsupported controller FDT nodes disabled and do not establish EDK2,
+Pi 5 or controller data-plane acceptance. See
+[the Daemonarchy record](https://github.com/jordanhubbard/daemonarchy/blob/work/pi-simulator-checkpoint/docs/testing-pi4-uboot-fdt-20261108.md).
+
+See [emulator scope](emulator.md) for the other missing devices. EDK2's next
+step is a complete SD/console/loader handoff; silently skipping failed MMIO
+would hide unsupported hardware.
