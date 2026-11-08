@@ -73,7 +73,9 @@ The CPU and actual GPU-DMA reads agree; real migration retained both -40,000
 and 125,000 mC injections and reset returned each target to its default.
 
 The existing Linux FDT fixture still disables the thermal node. The register
-and migration controls alone do not qualify the Linux guest driver. An actual
-Linux control and a new unchanged-firmware FreeBSD ACPI/USB run are required
-before claiming those guest paths pass. Neither can establish physical
-temperature accuracy or Pi 5/RP1 support.
+and migration controls alone do not qualify the Linux guest driver. The later
+[unchanged-firmware FreeBSD ACPI/USB control](emulator-pi4-uefi.md#connected-pcieusb-and-acpi-checkpoint)
+passes on the final chained-IOC binary, including the native ACPI thermal read,
+four active CPUs, init, durable diagnostics and synchronized reset. The Linux
+guest thermal driver, physical temperature accuracy and Pi 5/RP1 remain
+unqualified.

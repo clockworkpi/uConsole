@@ -183,8 +183,26 @@ passes all eight model suites, 11 source-cache tests, the Linux control's
 archive passes extracted GUI validation and all eight model suites against
 its exact extracted binary. All 1,861 host tests pass (one skipped).
 
-The third ACPI/USB cold boot passes the thermal read, enumerates native xHCI,
-USB mass storage and `da0`, then pauses after EFI RTC initial-time discovery.
-It has not saved init diagnostics or completed the required synchronized
-reset. Full ACPI/USB acceptance is still open. These simulator results do not
-qualify physical Pi 4, Pi 5/RP1, Ethernet, full RAM or the VideoCore boot chain.
+The third ACPI/USB cold boot passes the thermal read and enumerates native
+xHCI, USB mass storage and `da0`. A diagnostic observer then reveals missing
+completion of a chained 128 KiB disk read: data arrives, but the final IOC event
+is suppressed. It eventually reaches init after exhausting retries on a CTF
+read, so that observer is disqualified as clean storage acceptance.
+
+The [chained IOC repair](emulator-pcie-controller.md#chained-usb-storage-completion-repair)
+restores each ordinary successful completion while retaining existing terminal
+short/error behavior. An independent generic xHCI/USB-storage fixture proves
+the baseline loses the final event despite the exact payload and verifies the
+repair, single-IOC reads, short transfers, Event Data byte counts, STALL and
+migration continuation. Broader compound short/error cases remain separate.
+
+A fresh uninterrupted cold boot on QEMU SHA-256
+`c392d7c5b3a56f7afc01887a679e878c40953b0da0fde9dc0fd2edda4d31740d`
+passes all 19 UEFI/ACPI/USB acceptance checks: actual EFI loader and checksummed
+ACPI topology, native USB/UFS root, four active CPUs, init, seven completed
+probes, ten durable files, clean storage diagnostics and synchronized guest
+reset. The original image hash is unchanged. No debugger was attached.
+
+The final Linux ARM64 package passes extracted archive/GUI validation and all
+nine model suites against that exact binary. Physical Pi 4, Pi 5/RP1, Ethernet,
+full RAM and the VideoCore/EEPROM chain remain separate acceptance targets.
