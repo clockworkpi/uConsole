@@ -25,21 +25,27 @@ DCBAA = 0x01300000
 
 
 class Machine:
-    def __init__(self, root, name, stack, binary, incoming=False):
+    def __init__(self, root, name, stack, binary, incoming=False, generic=False, compact=False):
         self.monitor = root / (name + '-qmp')
         test = root / (name + '-test')
         log = stack.enter_context((root / (name + '.log')).open('wb'))
+        self.generic = generic
+        self.xbase = 0x10000000 if generic else XHCI
+        self.ram_offset = 0x40000000 if generic else 0
+        board = (['-nodefaults', '-M', 'virt,highmem=off', '-device',
+                  'qemu-xhci,id=host,addr=1.0,msi=off,msix=off' +
+                  (',compact-mmio=on' if compact else '')] if generic else
+                 ['-M', 'raspi4b', '-global', 'bcm2838-pcie-disconnected.connected-xhci=on'])
         self.process = subprocess.Popen([
-            binary, '-M', 'raspi4b', '-accel', 'qtest', '-S',
+            binary, *board, '-accel', 'qtest', '-S',
             '-display', 'none', '-serial', 'none', '-monitor', 'none', '-nic', 'none',
-            '-global', 'bcm2838-pcie-disconnected.connected-xhci=on',
             '-qtest', f'unix:{test},server=on,wait=off',
             '-qmp', f'unix:{self.monitor},server=on,wait=off',
             *(['-incoming', 'defer'] if incoming else [])], stdout=log, stderr=log)
         stack.callback(self.close)
         sock = stack.enter_context(connect(test, self.process))
         self.stream = stack.enter_context(sock.makefile('rwb', buffering=0))
-        self.dma_base = 0
+        self.dma_base = self.ram_offset
 
     def close(self):
         if self.process.poll() is None:
@@ -82,18 +88,20 @@ class Machine:
         self.write(address, value)
 
     def memory(self, address, data):
-        self.command(f'write {address:#x} {len(data):#x} 0x{data.hex()}')
+        self.command(f'write {address + self.ram_offset:#x} {len(data):#x} 0x{data.hex()}')
 
     def inspect(self, address, length):
-        return bytes.fromhex(self.command(f'read {address:#x} {length:#x}').split()[1][2:])
+        return bytes.fromhex(self.command(f'read {address + self.ram_offset:#x} {length:#x}').split()[1][2:])
 
     def xread(self, offset):
-        return self.read(XHCI + offset)
+        return self.read(self.xbase + offset)
 
     def xwrite(self, offset, value):
-        self.write(XHCI + offset, value)
+        self.write(self.xbase + offset, value)
 
     def irq(self):
+        if self.generic:
+            return bool(self.xread(self.runtime + 0x20) & 1)
         # PCI INTx A is native SPI143, architectural interrupt175.
         return bool(self.read(0xff841214) & (1 << 15))
 
@@ -122,19 +130,40 @@ def configure(machine, dma_base=0):
     # BAR sizing is performed by the actual PCI device, not stored echoes.
     machine.config(1, 0, 0, 0x10, 0xffffffff)
     bar_mask = machine.config(1, 0, 0, 0x10)
-    assert bar_mask & ~0xf == 0xffffc000 and bar_mask & 6 == 4, hex(bar_mask)
+    assert bar_mask & ~0xf == 0xfffff000 and bar_mask & 6 == 4, hex(bar_mask)
     machine.config(1, 0, 0, 0x10, 0xf8000000)
     machine.config(1, 0, 0, 0x14, 0)
     machine.config(1, 0, 0, 4, 6)  # MEM + bus master; MSI/MSI-X remain disabled.
     for bdf in ((1, 1, 0), (1, 0, 1), (2, 0, 0)):
         assert machine.config(*bdf, 0) == 0xffffffff, ('Absent BDF responded', bdf)
     assert machine.xread(0) == 0x01000040, 'Outbound bridge/window/BAR did not reach real xHCI'
+    geometry(machine, compact=True)
     machine.config(0, 0, 0, 4, 4)  # Bridge memory forwarding disabled.
     assert machine.xread(0) != 0x01000040
     machine.config(0, 0, 0, 4, 6)
     assert machine.xread(0) == 0x01000040
     assert not machine.irq()
     machine.dma_base = dma_base
+
+
+def geometry(machine, compact):
+    """All advertised banks must fit the actual aperture, including last entries."""
+    size = 0x1000 if compact else 0x4000
+    params = machine.xread(4)
+    slots, interrupts, ports = params & 255, (params >> 8) & 0x7ff, params >> 24
+    oper = machine.xread(0) & 255
+    runtime = machine.xread(0x18) & ~0x1f
+    doorbell = machine.xread(0x14) & ~3
+    assert (runtime, doorbell) == ((0x800, 0xc00) if compact else (0x1000, 0x2000))
+    assert slots > 0 and interrupts > 0 and ports > 0
+    assert oper + 0x400 + ports * 16 <= runtime
+    assert runtime + 0x20 + interrupts * 0x20 <= doorbell
+    assert doorbell + (slots + 1) * 4 <= size
+    # Last interrupter's real moderation register is writable, not just a cap.
+    last = runtime + 0x20 + (interrupts - 1) * 0x20 + 4
+    machine.xwrite(last, 0x1234)
+    assert machine.xread(last) & 0xffff == 0x1234
+    machine.xwrite(last, 0)
 
 
 def rings(machine):
@@ -251,6 +280,31 @@ def run(binary, output=None):
             root = output.resolve()
         try:
             exercise(binary, root, stack)
+            for compact in (False, True):
+                generic = Machine(root, 'generic-' + str(compact), stack, binary,
+                                  generic=True, compact=compact)
+                config = 0x3f008000  # virt highmem=off ECAM, slot 1 function 0.
+                generic.write(config + 0x10, 0xffffffff)
+                expected = 0xfffff000 if compact else 0xffffc000
+                assert generic.read(config + 0x10) & ~15 == expected
+                generic.write(config + 0x10, generic.xbase)
+                generic.write(config + 0x14, 0)
+                generic.write(config + 4, 6, 'w')
+                geometry(generic, compact)
+                rings(generic)
+                noop(generic, 0)
+                acknowledge(generic, 1)
+                noop(generic, 1)
+                acknowledge(generic, 2)
+                qmp(generic.monitor, 'quit')
+                assert generic.process.wait(timeout=10) == 0
+            invalid = subprocess.run([binary, '-nodefaults', '-M', 'virt', '-display', 'none',
+                '-serial', 'none', '-monitor', 'none', '-nic', 'none', '-S', '-device',
+                'qemu-xhci,compact-mmio=on,msix=on'], capture_output=True, timeout=10)
+            assert invalid.returncode != 0
+            assert b'compact-mmio requires msix=off' in invalid.stderr
+            print('PASS: compact 4KiB bank bounds, unchanged generic 16KiB/default and opt-in '
+                  'ring operation, compact/MSI-X refusal')
         except BaseException:
             for path in sorted(root.glob('*.log')):
                 print(f'--- retained diagnostic: {path} ---', file=sys.stderr)
