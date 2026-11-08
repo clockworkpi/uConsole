@@ -3,7 +3,7 @@
 The `raspi4b` controller at CPU `0xfd500000` (GPU `0x7d500000`) defaults to a
 disconnected port. An optional connected profile uses QEMU's real PCI bridge,
 xHCI controller and USB engines. Neither profile qualifies physical PCIe or
-Pi 5/RP1. The ordinary Linux FDT fixture still disables its PCIe node.
+Pi 5/RP1. The default FDT profile disables its PCIe node; the connected opt-in retains it.
 
 ## Disconnected profile
 
@@ -23,7 +23,7 @@ Enable the virtual endpoint with:
 ```
 
 The retained QOM type name is also the default-profile interface. Opting in
-creates a real `pcie-root-port` at BDF `00:00.0` and `qemu-xhci` at `01:00.0`.
+creates a BCM-layout subclass of QEMU `pcie-root-port` at BDF `00:00.0` and `qemu-xhci` at `01:00.0`.
 They retain their QEMU identities and ordinary PCI configuration/BAR semantics;
 this does not impersonate a VL805. The USB bus is `bcm-xhci.0`, so an actual
 USB disk can be attached with `-device usb-storage,bus=bcm-xhci.0,drive=stick`
@@ -58,10 +58,82 @@ or endpoint MSI implementation. Actual USB storage bootstrap is qualified
 separately from controller tests; a command-ring test alone does not establish
 UEFI or kernel boot.
 
+## Native FreeBSD FDT and USB loading
+
+The connected opt-in now preserves the `brcm,bcm2711-pcie` FDT node and can coexist
+with the separate real GENET profile. The default disconnected profile still
+removes PCIe; no firmware FDT properties such as `brcm,enable-ssc` are deleted to
+bypass controller initialization.
+
+FreeBSD's existing `bcm2838_pci.c` reads link control/status at the fixed Broadcom
+config offset `0xbc`. The generic QEMU root-port PCIe capability was at `0x54`,
+so the first node-retained cold boot failed native attach with "controller started
+but link is not up". The connected root now places the actual QEMU PCIe capability
+at `0xac`, making the real link control/status DWORD available at `0xbc`.
+The layout pattern follows official QEMU commits
+[`7ae9ecd37fdb87bd193bdc1fdcf81f60e2dc7864`](https://github.com/qemu/qemu/commit/7ae9ecd37fdb87bd193bdc1fdcf81f60e2dc7864)
+and `7ff1107bf2cd4118a789ecdc66f70c22120d980b`, with upstream attribution retained.
+It preserves QEMU IDs and real bridge behavior; it does not replace a status read
+with fixed success bits or import upstream's broad controller register shadow.
+
+The retained Ubuntu U-Boot lacks the BCM PCI host driver. A separately built,
+unmodified upstream U-Boot v2025.10 `rpi_4_defconfig`, pinned to commit
+`e50b1e8715011def8aff1588081a2649a2c6cd47`, executes that driver. Its first cold run
+faulted at CPU `0xfd501100`, ESR `0x96000250`, while starting the real SSC MDIO
+sequence. The selected connected PHY profile therefore implements controller
+MDIO ADDR/WRITE/READ at `0x1100/0x1104/0x1108`, port0 bank select `0x1f`, SSC bank
+`0x1100`, control register2 and read-only status register1. WRITE DONE clears on
+completion and READ DONE sets with data. SSC enable/override bits control SSC
+status; the bridge/SerDes state controls PLL availability. Unknown PHY tuples read
+as absent `0xffff`; writes do not fabricate another PHY. This is a synchronous
+selected SSC profile, without electrical or analog timing fidelity. The primary
+contract is the pinned U-Boot `drivers/pci/pcie_brcmstb.c:210-286` and included
+`arch/arm/mach-bcm283x/include/mach/acpi/bcm2711.h`; copyright/license provenance is
+retained in the implementation. The firmware keeps `brcm,enable-ssc` enabled.
+
+Native FreeBSD programs an identity 8GiB BAR2 aperture but restricts child DMA below
+960MiB. Its FDT outbound range maps PCI `0xc0000000` to CPU `0x600000000`.
+The native-init test reproduces that setup and cold bridge-window relocation,
+then executes real xHCI DMA/INTx, reset and migration. Native MSI initialization
+registers are exercised, but no endpoint MSI/EOI support is claimed. The existing
+xHCI endpoint has MSI/MSI-X disabled and uses native DT INTx without guest tunables.
+
+The new root-port capability layout has a distinct VMState section identity;
+older connected-layout streams are rejected rather than silently misinterpreted.
+The disconnected controller's migration contract is unchanged and was tested
+against the older qualified binary. A connected-only optional MDIO subsection
+preserves selector, SSC and transaction state; reset clears that state.
+
+The frozen model candidate is generation
+`0242009a2e892f7efaaacf6a014b41cab35888f84647256504eccd2493bef1e6`, system binary
+SHA256 `08d5088766b2670847f0ec1c57cc7aeceb24f6c3fc98caff6ed2f6265718d834`.
+The pinned U-Boot binary SHA256 is
+`0679280e659e284cfebb3fa568747c3fcab5bdcc4784f434e8f89003247757b4`.
+Private retained evidence under
+`/home/jkh/daemonarchy-debug/pi4-fdt-usb-20261108/` includes `gate1` (native attach
+failure), `uboot4` (MDIO abort), `native-mdio.log` (controller/data-plane controls),
+and `usb5` (USB-only EFIloader, native USB/UFS root and init, no SD drive).
+The 65-second `usb5` observer ended by host cleanup while the guest remained
+running; it does not establish completed diagnostics, network transfer or clean
+shutdown. The subsequent public USB-only controller passed 34/34 checks on 2GiB and 35/35
+on 8GiB with the same frozen QEMU/U-Boot and the newest owned GPIO-hog kernel.
+It rejected SD media, verified USB EFIloader paths and exact virtual disk size,
+and authenticated the mounted UFS root's GEOM provider as `da0`. Native
+`bcm2838_pcib`/PCI/xHCI/umass/da0 and GENET completed trusted bidirectional 1MiB
+SCP plus roundtrip hashes, seven probes, 18 durable files and natural guest reset.
+The 8GiB guest reported `hw.physmem=8430018560`. Both base images stayed unchanged.
+Retained receipts are
+`/home/jkh/daemonarchy-debug/pi4-usb-network-audit-20261108/freebsd-usb-hogs-{2g,8g}/result.json`.
+A separate 8GiB pftf/ACPI USB compatibility run passed all 20 checks on the same
+model, including full-memory bounds and natural reset; its receipt is
+`pi4-fdt-usb-20261108/uefi-usb-hogs-8g/result.json` under the debug directory.
+These are native guest runs in the simulator. QEMU still injects U-Boot; they do
+not qualify EEPROM/VideoCore boot or physical hardware.
+
 ## Reset, interrupts and migration
 
 Bridge reset and PERST have independent readback. Bridge reset clears programmed
-control/window state and interrupt banks; writes are ignored while it is held.
+control/window state and interrupt banks; window programming is ignored while it is held.
 In the connected profile, assertion also resets the actual downstream devices
 and gates forwarding/DMA. Power-on and system reset hold both resets asserted.
 Releasing reset provides the selected profile's link status.
@@ -84,6 +156,7 @@ These sources do not establish hardware-equivalent timing or reset defaults.
 ```sh
 python3 tools/test_emulator_pcie.py --qemu build/emulator/qemu-build/qemu-system-aarch64
 python3 tools/test_emulator_pcie_xhci.py --qemu build/emulator/qemu-build/qemu-system-aarch64
+python3 tools/test_emulator_pcie_fdt.py --qemu build/emulator/qemu-build/qemu-system-aarch64
 ```
 
 The connected test enumerates actual bridge/endpoint configuration, sizes the
