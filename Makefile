@@ -90,6 +90,7 @@ check-emulator: keyboard-oracle
 	python3 tools/test_emulator_pcie.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_genet.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_sdhci_stop.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
+	python3 tools/test_emulator_sdhci_adma_stop.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_usb_wakeup.py
 	python3 tools/test_emulator_usb_frames.py
 	python3 tools/test_emulator_audio.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64' --reconnect-cycles 200 --capture
