@@ -141,3 +141,11 @@ The storage fix passed these controls on QEMU binary SHA-256
 All eight prior model suites and 11 source-cache tests also passed. The same
 storage fixture independently requires the missing final event on the immutable
 pre-fix `bb335a6d…` baseline while verifying its complete disk payload.
+
+A fresh uninterrupted ACPI USB experiment on this exact `c392d7c5…` binary
+then passed all 19 acceptance checks: EFI loader, native ACPI xHCI/USB storage,
+UFS root, four active CPUs, seven completed probes and 10 durable diagnostic
+files. Its kernel log passed the storage I/O cleanliness guard, its source image
+remained unchanged, and the only stop sequence was a guest-requested reset.
+The earlier debugger-observed run remains disqualified. This is simulator
+bootstrap evidence, not physical Pi 4 or Pi 5 acceptance.
