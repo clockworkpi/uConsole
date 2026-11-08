@@ -380,6 +380,8 @@ static int pcie_post_load(void *opaque, int version)
 static const VMStateDescription vmstate_pcie = {
     .name = TYPE_BCM2838_PCIE, .version_id = 2, .minimum_version_id = 1,
     .pre_save = pcie_pre_save, .post_load = pcie_post_load,
+    /* Endpoints reconstruct active contexts with DMA in their post_load. */
+    .priority = MIG_PRI_IOMMU,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, BCM2838PcieState, BCM2838_PCIE_NREGS),
         VMSTATE_UINT32(reset, BCM2838PcieState),

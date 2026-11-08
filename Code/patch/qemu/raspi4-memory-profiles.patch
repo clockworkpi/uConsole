@@ -1,0 +1,176 @@
+--- a/include/hw/arm/raspi_platform.h
++++ b/include/hw/arm/raspi_platform.h
+@@ -43,6 +43,8 @@
+     MachineState parent_obj;
+     /*< public >*/
+     struct arm_boot_info binfo;
++    /* Physical RAM map shared by CPUs and device DMA, excluding MMIO. */
++    MemoryRegion physical_ram, ram_low, ram_high;
+ };
+ 
+ struct RaspiBaseMachineClass {
+--- a/hw/arm/raspi.c
++++ b/hw/arm/raspi.c
+@@ -248,6 +248,8 @@
+                              BCM283XBaseState *soc)
+ {
+     RaspiBaseMachineClass *mc = RASPI_BASE_MACHINE_GET_CLASS(machine);
++    RaspiBaseMachineState *s = RASPI_BASE_MACHINE(machine);
++    MemoryRegion *physical_ram = machine->ram;
+     uint32_t board_rev = mc->board_rev;
+     uint64_t ram_size = board_ram_size(board_rev);
+     uint32_t vcram_base, vcram_size;
+@@ -264,12 +266,33 @@
+         exit(1);
+     }
+ 
+-    /* FIXME: Remove when we have custom CPU address space support */
+-    memory_region_add_subregion_overlap(get_system_memory(), 0,
+-                                        machine->ram, 0);
+-
+-    /* Setup the SOC */
+-    object_property_add_const_link(OBJECT(soc), "ram", OBJECT(machine->ram));
++    if (board_processor_id(board_rev) == PROCESSOR_ID_BCM2838) {
++        /* BCM2711 has a 64 MiB peripheral hole below 4 GiB. Keep the
++         * backing offsets equal to physical addresses: neither CPUs nor
++         * PCIe DMA may fall through an unimplemented peripheral to RAM.
++         * The VideoCore reservation is still backed, but excluded from
++         * the OS memory map separately by the boot/FDT code. */
++        const uint64_t peripheral_base = 0xfc000000ULL;
++        const uint64_t peripheral_end = 4 * GiB;
++        memory_region_init(&s->physical_ram, OBJECT(machine),
++                           "bcm2711-physical-ram", ram_size);
++        memory_region_init_alias(&s->ram_low, OBJECT(machine),
++                                 "bcm2711-ram-low", machine->ram, 0,
++                                 MIN(ram_size, peripheral_base));
++        memory_region_add_subregion(&s->physical_ram, 0, &s->ram_low);
++        if (ram_size > peripheral_end) {
++            memory_region_init_alias(&s->ram_high, OBJECT(machine),
++                                     "bcm2711-ram-high", machine->ram,
++                                     peripheral_end, ram_size - peripheral_end);
++            memory_region_add_subregion(&s->physical_ram, peripheral_end,
++                                        &s->ram_high);
++        }
++        physical_ram = &s->physical_ram;
++    }
++    memory_region_add_subregion_overlap(get_system_memory(), 0, physical_ram, 0);
++
++    /* Setup the SOC. Device DMA must use the same physical RAM map. */
++    object_property_add_const_link(OBJECT(soc), "ram", OBJECT(physical_ram));
+     object_property_set_int(OBJECT(soc), "board-rev", board_rev,
+                             &error_abort);
+     object_property_set_str(OBJECT(soc), "command-line",
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -48,15 +48,21 @@
+                                    NULL, &error_fatal);
+     scells = qemu_fdt_getprop_cell(fdt, "/", "#size-cells",
+                                    NULL, &error_fatal);
+-    /* validated by arm_load_dtb */
+-    g_assert(acells && scells);
+-
+-    qemu_fdt_add_subnode(fdt, nodename);
+-    qemu_fdt_setprop_string(fdt, nodename, "device_type", "memory");
+-    qemu_fdt_setprop_sized_cells(fdt, nodename, "reg",
+-                                        acells, mem_base,
+-                                        scells, mem_len);
+-
++    if ((acells != 1 && acells != 2) ||
++        (scells != 1 && scells != 2) ||
++        (acells == 1 && mem_base > UINT32_MAX) ||
++        (scells == 1 && mem_len > UINT32_MAX)) {
++        error_report("BCM2711 memory bank is not representable in FDT cells");
++        exit(1);
++    }
++
++    if (qemu_fdt_add_subnode(fdt, nodename) < 0 ||
++        qemu_fdt_setprop_string(fdt, nodename, "device_type", "memory") < 0 ||
++        qemu_fdt_setprop_sized_cells(fdt, nodename, "reg",
++                                   acells, mem_base, scells, mem_len) < 0) {
++        error_report("Cannot create BCM2711 FDT memory bank %s", nodename);
++        exit(1);
++    }
+     g_free(nodename);
+ }
+ 
+@@ -86,7 +92,24 @@
+     ram_size = board_ram_size(info->board_id);
+ 
+     if (ram_size > UPPER_RAM_BASE) {
+-        raspi_add_memory_node(fdt, UPPER_RAM_BASE, ram_size - UPPER_RAM_BASE);
++        /* arm_load_dtb has already emitted the low ARM bank below the
++         * VideoCore reservation. Do not describe the peripheral hole as RAM. */
++        raspi_add_memory_node(fdt, UPPER_RAM_BASE,
++                             MIN(ram_size, 0xfc000000ULL) - UPPER_RAM_BASE);
++    }
++    if (ram_size > 4 * GiB) {
++        uint32_t scells = qemu_fdt_getprop_cell(fdt, "/", "#size-cells",
++                                               NULL, &error_fatal);
++        uint64_t base = 4 * GiB;
++        /* Captured Pi4 firmware uses one size cell: a four-GiB bank
++         * cannot fit. Split into two-GiB banks without changing the
++         * root cell widths (which govern other devices too). */
++        while (base < ram_size) {
++            uint64_t length = MIN(ram_size - base,
++                                  scells == 1 ? 2 * GiB : ram_size);
++            raspi_add_memory_node(fdt, base, length);
++            base += length;
++        }
+     }
+ 
+     /* ClockworkPi uConsole carrier: AXP221 PMIC on the CM4 I2C0 bus. */
+@@ -200,9 +223,42 @@
+     .interfaces     = aarch64_machine_interfaces,
+ };
+ 
++#if HOST_LONG_BITS == 64
++/* Explicit capacity profiles. The original raspi4b class stays unchanged. */
++static void raspi4b_capacity_class_init(ObjectClass *oc, const void *data)
++{
++    MachineClass *mc = MACHINE_CLASS(oc);
++    RaspiBaseMachineClass *rmc = RASPI_BASE_MACHINE_CLASS(oc);
++
++    rmc->board_rev = *(const uint32_t *)data;
++    raspi_machine_class_common_init(mc, rmc->board_rev);
++    mc->auto_create_sdcard = true;
++    mc->init = raspi4b_machine_init;
++}
++
++static const uint32_t raspi4b_4g_revision = 0xc03115;
++static const uint32_t raspi4b_8g_revision = 0xd03115;
++static const TypeInfo raspi4b_4g_machine_type = {
++    .name = MACHINE_TYPE_NAME("raspi4b-4g"),
++    .parent = TYPE_RASPI4B_MACHINE,
++    .class_init = raspi4b_capacity_class_init,
++    .class_data = &raspi4b_4g_revision,
++};
++static const TypeInfo raspi4b_8g_machine_type = {
++    .name = MACHINE_TYPE_NAME("raspi4b-8g"),
++    .parent = TYPE_RASPI4B_MACHINE,
++    .class_init = raspi4b_capacity_class_init,
++    .class_data = &raspi4b_8g_revision,
++};
++#endif
++
+ static void raspi4b_machine_register_type(void)
+ {
+     type_register_static(&raspi4b_machine_type);
++#if HOST_LONG_BITS == 64
++    type_register_static(&raspi4b_4g_machine_type);
++    type_register_static(&raspi4b_8g_machine_type);
++#endif
+ }
+ 
+ type_init(raspi4b_machine_register_type)
+--- a/hw/arm/bcm2835_peripherals.c
++++ b/hw/arm/bcm2835_peripherals.c
+@@ -271,7 +271,8 @@
+     /* RAM is aliased four times (different cache configurations) on the GPU */
+     for (n = 0; n < 4; n++) {
+         memory_region_init_alias(&s->ram_alias[n], OBJECT(s),
+-                                 "bcm2835-gpu-ram-alias[*]", ram, 0, ram_size);
++                                 "bcm2835-gpu-ram-alias[*]", ram, 0,
++                                 MIN(ram_size, UPPER_RAM_BASE));
+         memory_region_add_subregion_overlap(&s->gpu_bus_mr, (hwaddr)n << 30,
+                                             &s->ram_alias[n], 0);
+     }

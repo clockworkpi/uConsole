@@ -128,7 +128,8 @@ build_ide() {
     cp -R "$root/assets/schematics" "$stage/libexec/uconsole-workbench/assets/"
     cp "$root/uconsole-tasks.json" "$stage/libexec/uconsole-workbench/"
     cp "$root/docs/emulator.md" "$root/docs/emulator-validation.md" \
-        "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pcie-controller.md" \
+        "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pi4-memory.md" \
+        "$root/docs/emulator-pcie-controller.md" \
         "$root/docs/emulator-genet-controller.md" \
         "$root/docs/emulator-framebuffer-alias.md" \
         "$root/docs/emulator-avs-thermal.md" \

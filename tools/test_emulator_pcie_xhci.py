@@ -25,7 +25,8 @@ DCBAA = 0x01300000
 
 
 class Machine:
-    def __init__(self, root, name, stack, binary, incoming=False, generic=False, compact=False):
+    def __init__(self, root, name, stack, binary, incoming=False, generic=False, compact=False,
+                 board_name='raspi4b', device_args=(), accel='qtest'):
         self.monitor = root / (name + '-qmp')
         test = root / (name + '-test')
         log = stack.enter_context((root / (name + '.log')).open('wb'))
@@ -35,9 +36,9 @@ class Machine:
         board = (['-nodefaults', '-M', 'virt,highmem=off', '-device',
                   'qemu-xhci,id=host,addr=1.0,msi=off,msix=off' +
                   (',compact-mmio=on' if compact else '')] if generic else
-                 ['-M', 'raspi4b', '-global', 'bcm2838-pcie-disconnected.connected-xhci=on'])
+                 ['-M', board_name, '-global', 'bcm2838-pcie-disconnected.connected-xhci=on'])
         self.process = subprocess.Popen([
-            binary, *board, '-accel', 'qtest', '-S',
+            binary, *board, *device_args, '-accel', accel, '-S',
             '-display', 'none', '-serial', 'none', '-monitor', 'none', '-nic', 'none',
             '-qtest', f'unix:{test},server=on,wait=off',
             '-qmp', f'unix:{self.monitor},server=on,wait=off',
@@ -179,17 +180,17 @@ def rings(machine):
     machine.xwrite(machine.oper, 2)
     assert machine.xread(machine.oper + 4) & 1
     command = machine.dma_base + CMD
-    machine.xwrite(machine.oper + 0x18, command | 1)
+    machine.xwrite(machine.oper + 0x18, (command | 1) & 0xffffffff)
     machine.xwrite(machine.oper + 0x1c, command >> 32)
-    machine.xwrite(machine.oper + 0x30, machine.dma_base + DCBAA)
-    machine.xwrite(machine.oper + 0x34, 0)
+    machine.xwrite(machine.oper + 0x30, (machine.dma_base + DCBAA) & 0xffffffff)
+    machine.xwrite(machine.oper + 0x34, (machine.dma_base + DCBAA) >> 32)
     machine.xwrite(machine.oper + 0x38, 1)
     intr = machine.runtime + 0x20
     machine.xwrite(intr + 0x08, 1)
-    machine.xwrite(intr + 0x10, machine.dma_base + ERST)
-    machine.xwrite(intr + 0x14, 0)
-    machine.xwrite(intr + 0x18, machine.dma_base + EVENT)
-    machine.xwrite(intr + 0x1c, 0)
+    machine.xwrite(intr + 0x10, (machine.dma_base + ERST) & 0xffffffff)
+    machine.xwrite(intr + 0x14, (machine.dma_base + ERST) >> 32)
+    machine.xwrite(intr + 0x18, (machine.dma_base + EVENT) & 0xffffffff)
+    machine.xwrite(intr + 0x1c, (machine.dma_base + EVENT) >> 32)
     machine.xwrite(intr, 2)
     machine.xwrite(machine.oper, 5)  # Run/stop + interrupt enable.
     assert not machine.xread(machine.oper + 4) & 1
@@ -208,7 +209,9 @@ def noop(machine, number):
 
 def acknowledge(machine, next_event):
     intr = machine.runtime + 0x20
-    machine.xwrite(intr + 0x18, machine.dma_base + EVENT + next_event * 16 | 8)
+    pointer = machine.dma_base + EVENT + next_event * 16
+    machine.xwrite(intr + 0x18, (pointer | 8) & 0xffffffff)
+    machine.xwrite(intr + 0x1c, pointer >> 32)
     machine.xwrite(intr, 3)  # IE plus write-one-clear pending.
     machine.xwrite(machine.oper + 4, 8)
     assert not machine.irq(), 'Acknowledging actual xHCI pending state did not lower INTx'

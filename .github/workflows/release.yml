@@ -117,6 +117,7 @@ jobs:
           python3 "$resources/tools/test_emulator_rng200.py" > "$evidence/rng200.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie.py" > "$evidence/pcie.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie_xhci.py" > "$evidence/pcie-xhci.log" 2>&1
+          python3 "$resources/tools/test_emulator_pi4_memory.py" --output "$evidence/pi4-memory" > "$evidence/pi4-memory.log" 2>&1
           python3 "$resources/tools/test_emulator_xhci_storage.py" > "$evidence/xhci-storage.log" 2>&1
           python3 "$resources/tools/test_emulator_genet.py" > "$evidence/genet.log" 2>&1
           python3 "$resources/tools/test_emulator_framebuffer_alias.py" > "$evidence/framebuffer-alias.log" 2>&1
@@ -179,6 +180,8 @@ jobs:
           path: |
             build/native-archive-validation/native-archive-acceptance.json
             build/native-archive-validation/*.log
+            build/native-archive-validation/pi4-memory/result.json
+            build/native-archive-validation/pi4-memory/migration-registers.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
