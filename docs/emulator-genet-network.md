@@ -92,9 +92,9 @@ The first frozen network candidate is generation
 `qemu-system-aarch64` SHA256
 `9af365a27bfdbae57792666ce1d0d7cd136379ed6a8eabd1a0ab90009c6dbfe6`.
 The network packet/PHY suite and all ten existing hardware model suites passed on
-that exact binary. Source-cache safety tests also passed (11 cases). Local retained
-receipts are under `/home/jkh/daemonarchy-debug/genet-upstream-evaluation-20261108/`:
-`packets-build5.log`, `packets-build5/`, and `regressions-{0,1,2}.log`.
+that exact binary. Source-cache safety tests also passed (11 cases). Retained receipt names are `packets-build5.log`, `packets-build5/`, and
+`regressions-{0,1,2}.log`; these are private diagnostic artifacts, not bundled
+release inputs.
 
 ## TX assembly across producer updates
 
@@ -133,3 +133,58 @@ Staging and existing packet/PHY suite receipts are `stg7-freeze.log` and
 Hardware MIB counter fidelity, full PHY electrical/forced-mode behavior, jumbo RX,
 and RX checksum verification remain outside qualification. Native OS acceptance
 and physical performance remain separate from these model controls.
+
+## Actual Linux and FreeBSD network controls
+
+The final `bb79102f…` binary passes actual OS networking separately from the
+register/descriptor fixtures. The public Linux controller
+[`tools/test_emulator_genet_linux.py`](../tools/test_emulator_genet_linux.py)
+boots the retained 6.12.62-v8+ reference kernel and ext4 SD root, runs native
+`bcmgenet`/PHY initialization and DHCP, and exchanges independent 1 MiB HTTP
+payloads in both directions. A fresh nonce and SHA-256 acknowledge the upload;
+the downloaded bytes must exactly match their expected size and SHA-256. The
+reference root needs `dhcpcd`, Python3 and `ethtool`, and uses root PARTUUID
+`21965b0c-02`. No init/service startup or extra NIC supplies its address.
+
+Use explicit regular input files and their SHA-256 values:
+
+```sh
+python3 tools/test_emulator_genet_linux.py \
+  --image "$IMAGE" --image-sha256 "$IMAGE_SHA256" \
+  --kernel "$KERNEL" --kernel-sha256 "$KERNEL_SHA256" \
+  --dtb "$CM4_DTB" --dtb-sha256 "$CM4_DTB_SHA256" \
+  --qemu "$QEMU" --qemu-sha256 "$QEMU_SHA256" \
+  --qemu-img "$QEMU_IMG" --qemu-img-sha256 "$QEMU_IMG_SHA256" \
+  --phy-addr 0 --output "$FRESH_PRIVATE_OUTPUT"
+```
+
+For the 8 GB model add `--machine raspi4b-8g`. Every run uses a fresh overlay
+and restricted user networking, with the HTTP service exposed only through
+a loopback host forward. It requires the actual native driver, selected PHY,
+carrier and DHCP address, positive NIC IRQ counters, more than 256 transmitted
+and received packets, zero packet errors, four CPUs and the selected memory
+range. Finally it remounts root read-only and requires natural guest poweroff,
+clean emulator exit and unchanged input hashes. The manifest binds controller,
+console helper and generated guest programs to their exact hashes.
+
+The public controller passes all 18 checks on both 2 and 8 GB models. The actual
+Linux IRQ action is labelled `eth0`, at GIC IRQs 189/190; filtering only the
+word `genet` would miss these counters. A failed prototype observation is
+preserved rather than relabelled as a passing run. PHY address 0 matches the
+retained CM4 fixture; the Pi4B model default remains 1.
+
+The [FreeBSD FDT controller](https://github.com/jordanhubbard/daemonarchy/blob/work/pi4-network-bootstrap/tools/hwtrace/pi4-network-simulator.py)
+independently passes 26 checks at 2 GB and 27 at 8 GB. It uses native `genet0`
+and `brgphy`, DHCP, preprovisioned VM-only SSH identities with strict host-key
+verification, and bidirectional 1 MiB SCP plus a verified upload round trip.
+The final run uses native kernel SHA-256
+`77b90b794de95ec3908f4c182dae972fa81265f0dfeec527de23a8ce69aee328`,
+source image SHA-256
+`707f14974d96eae0b5ed5a0ae6849d739b1eb197e66051040d44bd558e881b93`,
+and retains 8,430,018,560 bytes of guest `hw.physmem` on the 8 GB model.
+All seven bounded probes, 15 offline files, clean storage, native byte counters,
+synchronized reset and unchanged source images pass.
+
+These results establish packet-backed simulated boot/network controls. They do
+not establish physical Pi networking, throughput, whole-memory stress, installed
+desktop/update/recovery, ACPI GENET or Pi5/RP1 support.
