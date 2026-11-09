@@ -50,7 +50,7 @@ modem-flash-tool:
 
 check:
 	$(PYTHON) tools/run_host_tests.py discover -s tests -v
-	shellcheck Code/scripts/uconsole-4g-cm5 Bin/uconsole_keyboard_flash/maple_upload Bin/uconsole_keyboard_flash/flash.sh scripts/platform.sh scripts/release.sh
+	shellcheck Code/scripts/uconsole-4g-cm5 Bin/uconsole_keyboard_flash/maple_upload Bin/uconsole_keyboard_flash/flash.sh scripts/platform.sh scripts/release.sh tools/build_pi5_freebsd_root.sh
 
 check-gui:
 	xvfb-run -a /usr/bin/python3 -m unittest discover -s tests -p 'test_modem_gui.py' -v
@@ -91,6 +91,8 @@ check-emulator: keyboard-oracle
 	python3 tools/test_emulator_xhci_storage.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pcie_xhci.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pcie_fdt.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
+	python3 tools/test_prepare_pi5_boot.py
+	python3 tools/test_emulator_pi5_boot.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_compose_pcie2_contract_dtb.py
 	python3 tools/test_emulator_pcie2_contract.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
 	python3 tools/test_emulator_pi4_memory.py --qemu '$(BUILD_DIR)/emulator/qemu-build/qemu-system-aarch64'
