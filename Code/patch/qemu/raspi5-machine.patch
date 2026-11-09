@@ -1,0 +1,8 @@
+--- a/hw/arm/meson.build
++++ b/hw/arm/meson.build
+@@ -1,3 +1,5 @@
+ arm_ss = ss.source_set()
+ arm_common_ss = ss.source_set()
++arm_common_ss.add(when: ['CONFIG_RASPI', 'TARGET_AARCH64'], if_true: files('raspi5.c'))
++arm_common_ss.add(when: ['CONFIG_RASPI', 'TARGET_AARCH64'], if_true: files('../misc/bcm2712_boot.c'))
+ arm_common_ss.add(when: 'CONFIG_ARM_VIRT', if_true: files('virt.c'))

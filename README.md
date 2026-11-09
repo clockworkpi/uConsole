@@ -91,6 +91,9 @@ The [emulator guide](docs/emulator.md) provides a local QEMU build, official-ima
 boot, serial console, writable image overlays, file transfer and image export,
 plus a Python/Tk source editor and emulator workbench. This is **partial CM4
 emulation**; the guide records missing uConsole devices and platform validation.
+A separate [Pi5 FreeBSD SD model](docs/emulator-pi5-freebsd.md) boots to
+multi-user on four Cortex-A76 CPUs with up to 8 GiB RAM.
+
 The [full-device plan](docs/emulator-device-plan.md) maps the schematics,
 firmware and Linux drivers to staged models and acceptance gates.
 

@@ -118,6 +118,8 @@ jobs:
           python3 "$resources/tools/test_emulator_pcie.py" > "$evidence/pcie.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie_xhci.py" > "$evidence/pcie-xhci.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie_fdt.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/pcie-fdt.log" 2>&1
+          python3 "$resources/tools/test_prepare_pi5_boot.py" > "$evidence/pi5-prepare.log" 2>&1
+          python3 "$resources/tools/test_emulator_pi5_boot.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/pi5-boot-rebuilt.log" 2>&1
           python3 "$resources/tools/test_compose_pcie2_contract_dtb.py" > "$evidence/pcie2-composer-rebuilt.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie2_contract.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" --output "$evidence/pcie2-contract-rebuilt" > "$evidence/pcie2-contract-rebuilt.log" 2>&1
           python3 "$resources/tools/test_emulator_pi4_memory.py" --qemu "$UCONSOLE_BUILD_DIR/emulator/qemu-build/qemu-system-aarch64" > "$evidence/pi4-memory-rebuilt.log" 2>&1
@@ -138,6 +140,7 @@ jobs:
           unset UCONSOLE_ROOT PYTHONPATH
           cd "$RUNNER_TEMP"
           "$qemu" -object memory-backend-ram,help > "$evidence/ram-backend-properties.log" 2>&1
+          python3 "$resources/tools/test_emulator_pi5_boot.py" --qemu "$qemu" > "$evidence/pi5-boot-bundled.log" 2>&1
           python3 "$resources/tools/test_compose_pcie2_contract_dtb.py" > "$evidence/pcie2-composer-bundled.log" 2>&1
           python3 "$resources/tools/test_emulator_pcie2_contract.py" --qemu "$qemu" --output "$evidence/pcie2-contract-bundled" > "$evidence/pcie2-contract-bundled.log" 2>&1
           python3 "$resources/tools/test_emulator_pi4_memory.py" --qemu "$qemu" --output "$evidence/pi4-memory" > "$evidence/pi4-memory.log" 2>&1

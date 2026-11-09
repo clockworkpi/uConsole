@@ -118,6 +118,7 @@ build_ide() {
         "$stage/share/doc/uconsole-workbench" \
         "$stage/share/uconsole-keyboard-flash"
     cp "$root"/tools/*.py "$stage/libexec/uconsole-workbench/tools/"
+    cp "$root/tools/build_pi5_freebsd_root.sh" "$stage/libexec/uconsole-workbench/tools/"
     cp -R "$root/tools/vendor" "$stage/libexec/uconsole-workbench/tools/"
     python3 "$root/tools/workbench_emulator.py" "$build_dir" "$root" "$stage/libexec/uconsole-workbench"
     cp "$root"/Code/patch/qemu/*.patch "$stage/libexec/uconsole-workbench/Code/patch/qemu/"
@@ -131,6 +132,7 @@ build_ide() {
         "$root/docs/emulator-pi4-uefi.md" "$root/docs/emulator-pi4-memory.md" \
         "$root/docs/emulator-pcie-controller.md" \
         "$root/docs/emulator-pcie2-contract.md" \
+        "$root/docs/emulator-pi5-freebsd.md" \
         "$root/docs/emulator-genet-controller.md" \
         "$root/docs/emulator-genet-network.md" \
         "$root/docs/emulator-framebuffer-alias.md" \

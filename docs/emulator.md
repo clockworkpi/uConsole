@@ -18,6 +18,10 @@ Daemonarchy firmware experiment and its measured hardware-model gaps.
 The [manual SDHCI stop fix](emulator-sdhci-stop.md) covers the explicit CMD12
 completion defect exposed by firmware GPT reads.
 
+The independent [Pi5 FreeBSD SD bootstrap](emulator-pi5-freebsd.md) uses a
+separate Cortex-A76/BCM2712 machine and reaches real multi-user through serial
+login. This is distinct from the Pi4-based selected PCIe2 contract target.
+
 ## Research and adoption decision
 
 Research performed 2026-09-21:
