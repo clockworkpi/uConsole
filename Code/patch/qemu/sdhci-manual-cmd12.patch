@@ -1,0 +1,99 @@
+--- a/hw/sd/sdhci.c
++++ b/hw/sd/sdhci.c
+@@ -333,6 +333,20 @@
+ 
+ #define BLOCK_SIZE_MASK (4 * KiB - 1)
+ 
++static void sdhci_complete_data_transfer(SDHCIState *s)
++{
++    timer_del(s->transfer_timer);
++    s->prnsts &= ~(SDHC_DOING_READ | SDHC_DOING_WRITE |
++            SDHC_DAT_LINE_ACTIVE | SDHC_DATA_INHIBIT |
++            SDHC_SPACE_AVAILABLE | SDHC_DATA_AVAILABLE);
++
++    if (s->norintstsen & SDHC_NISEN_TRSCMP) {
++        s->norintsts |= SDHC_NIS_TRSCMP;
++    }
++
++    sdhci_update_irq(s);
++}
++
+ static void sdhci_send_command(SDHCIState *s)
+ {
+     SDRequest request;
+@@ -383,6 +397,18 @@
+ 
+     sdhci_update_irq(s);
+ 
++    /* A successful explicit STOP_TRANSMISSION ends the host data phase too.
++     * The card has already accepted CMD12; do not run AutoCMD12 a second time.
++     * Discard any prefetched/partial FIFO and block-gap continuation state. */
++    if (!timeout && request.cmd == 12 &&
++        SDHC_COMMAND_TYPE(s->cmdreg) == SDHC_CMD_ABORT) {
++        s->data_count = 0;
++        s->stopped_state = sdhc_not_stopped;
++        s->blkgap &= ~(SDHC_STOP_AT_GAP_REQ | SDHC_CONTINUE_REQ);
++        sdhci_complete_data_transfer(s);
++        return;
++    }
++
+     if (!timeout && (s->blksize & BLOCK_SIZE_MASK) &&
+         (s->cmdreg & SDHC_CMD_DATA_PRESENT)) {
+         s->data_count = 0;
+@@ -405,15 +431,7 @@
+         s->rspreg[3] = ldl_be_p(response);
+     }
+ 
+-    s->prnsts &= ~(SDHC_DOING_READ | SDHC_DOING_WRITE |
+-            SDHC_DAT_LINE_ACTIVE | SDHC_DATA_INHIBIT |
+-            SDHC_SPACE_AVAILABLE | SDHC_DATA_AVAILABLE);
+-
+-    if (s->norintstsen & SDHC_NISEN_TRSCMP) {
+-        s->norintsts |= SDHC_NIS_TRSCMP;
+-    }
+-
+-    sdhci_update_irq(s);
++    sdhci_complete_data_transfer(s);
+ }
+ 
+ /*
+@@ -1157,6 +1175,7 @@
+         s->norintsts &= ~SDHC_NIS_CMDCMP;
+         break;
+     case SDHC_RESET_DATA:
++        timer_del(s->transfer_timer);
+         s->data_count = 0;
+         s->prnsts &= ~(SDHC_SPACE_AVAILABLE | SDHC_DATA_AVAILABLE |
+                 SDHC_DOING_READ | SDHC_DOING_WRITE |
+@@ -1169,6 +1188,15 @@
+     }
+ }
+ 
++/* SDMA runs synchronously until a buffer boundary. Outside the transfer
++ * function an active SDMA data phase is waiting for a System Address write. */
++static bool sdhci_sdma_in_progress(SDHCIState *s)
++{
++    return (s->trnmod & SDHC_TRNS_DMA) &&
++           (s->prnsts & SDHC_DATA_INHIBIT) &&
++           SDHC_DMA_TYPE(s->hostctl1) == SDHC_CTRL_SDMA;
++}
++
+ static void
+ sdhci_write(void *opaque, hwaddr offset, uint64_t val, unsigned size)
+ {
+@@ -1184,13 +1212,13 @@
+ 
+     switch (offset & ~0x3) {
+     case SDHC_SYSAD:
+-        if (!TRANSFERRING_DATA(s->prnsts)) {
++        if (!TRANSFERRING_DATA(s->prnsts) || sdhci_sdma_in_progress(s)) {
+             s->sdmasysad = (s->sdmasysad & mask) | value;
+             MASKED_WRITE(s->sdmasysad, mask, value);
+             /* Writing to last byte of sdmasysad might trigger transfer */
+             if (!(mask & 0xFF000000) && s->blkcnt &&
+                 (s->blksize & BLOCK_SIZE_MASK) &&
+-                SDHC_DMA_TYPE(s->hostctl1) == SDHC_CTRL_SDMA) {
++                sdhci_sdma_in_progress(s)) {
+                 sdhci_sdma_transfer(s);
+             }
+         }

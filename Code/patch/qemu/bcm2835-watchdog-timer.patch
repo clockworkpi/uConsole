@@ -1,0 +1,139 @@
+--- a/hw/misc/bcm2835_powermgt.c
++++ b/hw/misc/bcm2835_powermgt.c
+@@ -23,6 +23,30 @@
+ #define R_RSTS 0x20
+ #define V_RSTS_POWEROFF 0x555 /* Linux uses partition 63 to indicate halt. */
+ #define R_WDOG 0x24
++#define WDOG_MASK 0xfffff
++
++static void bcm2835_powermgt_expire(void *opaque)
++{
++    BCM2835PowerMgtState *s = opaque;
++
++    s->wdog = 0;
++    if ((s->rsts & 0x555) == V_RSTS_POWEROFF) {
++        qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
++    } else {
++        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
++    }
++}
++
++static void bcm2835_powermgt_reload(BCM2835PowerMgtState *s)
++{
++    if (s->rstc & V_RSTC_RESET) {
++        /* The 20-bit watchdog counts at 65536 Hz. Arming is not a reset. */
++        timer_mod(&s->watchdog, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
++                  ((uint64_t)s->wdog * NANOSECONDS_PER_SECOND + 65535) / 65536);
++    } else {
++        timer_del(&s->watchdog);
++    }
++}
+ 
+ static uint64_t bcm2835_powermgt_read(void *opaque, hwaddr offset,
+                                       unsigned size)
+@@ -39,6 +63,12 @@
+         break;
+     case R_WDOG:
+         res = s->wdog;
++        if (timer_pending(&s->watchdog)) {
++            int64_t left = timer_expire_time_ns(&s->watchdog) -
++                           qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++            res = (MAX(left, 0) * 65536 + NANOSECONDS_PER_SECOND - 1) /
++                  NANOSECONDS_PER_SECOND;
++        }
+         break;
+ 
+     default:
+@@ -70,13 +100,7 @@
+     switch (offset) {
+     case R_RSTC:
+         s->rstc = value;
+-        if (value & V_RSTC_RESET) {
+-            if ((s->rsts & 0xfff) == V_RSTS_POWEROFF) {
+-                qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
+-            } else {
+-                qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+-            }
+-        }
++        bcm2835_powermgt_reload(s);
+         break;
+     case R_RSTS:
+         qemu_log_mask(LOG_UNIMP,
+@@ -84,9 +108,8 @@
+         s->rsts = value;
+         break;
+     case R_WDOG:
+-        qemu_log_mask(LOG_UNIMP,
+-                      "bcm2835_powermgt_write: WDOG\n");
+-        s->wdog = value;
++        s->wdog = value & WDOG_MASK;
++        bcm2835_powermgt_reload(s);
+         break;
+ 
+     default:
+@@ -107,12 +130,13 @@
+ 
+ static const VMStateDescription vmstate_bcm2835_powermgt = {
+     .name = TYPE_BCM2835_POWERMGT,
+-    .version_id = 1,
+-    .minimum_version_id = 1,
++    .version_id = 2,
++    .minimum_version_id = 2,
+     .fields = (const VMStateField[]) {
+         VMSTATE_UINT32(rstc, BCM2835PowerMgtState),
+         VMSTATE_UINT32(rsts, BCM2835PowerMgtState),
+         VMSTATE_UINT32(wdog, BCM2835PowerMgtState),
++        VMSTATE_TIMER(watchdog, BCM2835PowerMgtState),
+         VMSTATE_END_OF_LIST()
+     }
+ };
+@@ -124,6 +148,15 @@
+     memory_region_init_io(&s->iomem, obj, &bcm2835_powermgt_ops, s,
+                           TYPE_BCM2835_POWERMGT, 0x200);
+     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
++    timer_init_ns(&s->watchdog, QEMU_CLOCK_VIRTUAL,
++                  bcm2835_powermgt_expire, s);
++}
++
++static void bcm2835_powermgt_finalize(Object *obj)
++{
++    BCM2835PowerMgtState *s = BCM2835_POWERMGT(obj);
++
++    timer_del(&s->watchdog);
+ }
+ 
+ static void bcm2835_powermgt_reset(DeviceState *dev)
+@@ -134,6 +167,7 @@
+     s->rstc = 0x00000102;
+     s->rsts = 0x00001000;
+     s->wdog = 0x00000000;
++    timer_del(&s->watchdog);
+ }
+ 
+ static void bcm2835_powermgt_class_init(ObjectClass *klass, const void *data)
+@@ -150,6 +184,7 @@
+     .instance_size = sizeof(BCM2835PowerMgtState),
+     .class_init    = bcm2835_powermgt_class_init,
+     .instance_init = bcm2835_powermgt_init,
++    .instance_finalize = bcm2835_powermgt_finalize,
+ };
+ 
+ static void bcm2835_powermgt_register_types(void)
+--- a/include/hw/misc/bcm2835_powermgt.h
++++ b/include/hw/misc/bcm2835_powermgt.h
+@@ -13,6 +13,7 @@
+ 
+ #include "hw/sysbus.h"
+ #include "qom/object.h"
++#include "qemu/timer.h"
+ 
+ #define TYPE_BCM2835_POWERMGT "bcm2835-powermgt"
+ OBJECT_DECLARE_SIMPLE_TYPE(BCM2835PowerMgtState, BCM2835_POWERMGT)
+@@ -24,6 +25,7 @@
+     uint32_t rstc;
+     uint32_t rsts;
+     uint32_t wdog;
++    QEMUTimer watchdog;
+ };
+ 
+ #endif

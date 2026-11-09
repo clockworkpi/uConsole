@@ -33,6 +33,13 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <time.h>
+
+/* macOS spells the combined hardware-flow-control flags separately. */
+#ifndef CRTSCTS
+#define CRTSCTS (CCTS_OFLOW | CRTS_IFLOW)
+#endif
 
 /* Function prototypes (belong in a seperate header file) */
 int   openserial(char *devicename);
@@ -42,14 +49,18 @@ int   setRTS(unsigned short level);
 
 
 /* Two globals for use by this module only */
-static int fd;
+static int fd = -1;
+static bool terminfo_saved;
 static struct termios oldterminfo;
 
 
 void closeserial(void)
 {
-     tcsetattr(fd, TCSANOW, &oldterminfo);
+     if (fd < 0) return;
+     if (terminfo_saved) tcsetattr(fd, TCSANOW, &oldterminfo);
      close(fd);
+     fd = -1;
+     terminfo_saved = false;
 }
 
 
@@ -57,15 +68,16 @@ int openserial(char *devicename)
 {
      struct termios attr;
 
-     if ((fd = open(devicename, O_RDWR)) == -1) return 0; /* Error */ 
+     if ((fd = open(devicename, O_RDWR | O_NOCTTY)) == -1) return 0; /* Error */
      atexit(closeserial);
 
      if (tcgetattr(fd, &oldterminfo) == -1) return 0; /* Error */
+     terminfo_saved = true;
      attr = oldterminfo;
      attr.c_cflag |= CRTSCTS | CLOCAL;
      attr.c_oflag = 0;
      if (tcflush(fd, TCIOFLUSH) == -1) return 0; /* Error */
-     if (tcsetattr(fd, TCSANOW, &attr) == -1) return 0; /* Error */ 
+     if (tcsetattr(fd, TCSANOW, &attr) == -1) return 0; /* Error */
 
      /* Set the lines to a known state, and */
      /* finally return non-zero is successful. */
@@ -118,44 +130,60 @@ int setDTR(unsigned short level)
  * Maple and Maple mini boards 
  */
 
-main(int argc, char *argv[])
+static int delay_ms(long milliseconds)
 {
- 	
-	if (argc<2 || argc >3)
-	{
-		printf("Usage upload-reset <serial_device> <Optional_delay_in_milliseconds>\n\r");
-		return;
-	}
+    struct timespec remaining = {
+        .tv_sec = milliseconds / 1000,
+        .tv_nsec = (milliseconds % 1000) * 1000000L
+    };
+    while (nanosleep(&remaining, &remaining) == -1) {
+        if (errno != EINTR) {
+            perror("nanosleep");
+            return 0;
+        }
+    }
+    return 1;
+}
 
- 	if (openserial(argv[1]))
-	{
-		// Send magic sequence of DTR and RTS followed by the magic word "1EAF"
-		setRTS(false);
- 		setDTR(false);
- 		setDTR(true);
+int main(int argc, char *argv[])
+{
+    long delay = 0;
+    char *end;
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "Usage: upload-reset <serial_device> [delay_ms: 0..60000]\n");
+        return EXIT_FAILURE;
+    }
+    if (argc == 3) {
+        errno = 0;
+        delay = strtol(argv[2], &end, 10);
+        if (errno || end == argv[2] || *end || delay < 0 || delay > 60000) {
+            fprintf(stderr, "Invalid delay: expected 0..60000 milliseconds\n");
+            return EXIT_FAILURE;
+        }
+    }
+    if (!openserial(argv[1])) {
+        fprintf(stderr, "Failed to initialize serial device: %s\n", argv[1]);
+        return EXIT_FAILURE;
+    }
 
-		usleep(50000L);
+    /* Send the bootloader reset sequence. Stop if any operation fails. */
+    if (!setRTS(false) || !setDTR(false) || !setDTR(true) || !delay_ms(50) ||
+        !setDTR(false) || !setRTS(true) || !setDTR(true) || !delay_ms(50) ||
+        !setDTR(false) || !delay_ms(50)) {
+        return EXIT_FAILURE;
+    }
 
-		setDTR(false);
-		setRTS(true);
-		setDTR(true);
-
-		usleep(50000L);
-
-		setDTR(false);
-
-		usleep(50000L);
-
-		write(fd,"1EAF",4);
- 		
-		closeserial();
-		if (argc==3)
-		{
-			usleep(atol(argv[2])*1000L);
-		}
-	}
-	else
-	{
-		printf("Failed to open serial device.\n\r");
-	}
+    const char magic[] = "1EAF";
+    size_t sent = 0;
+    while (sent < sizeof(magic) - 1) {
+        ssize_t count = write(fd, magic + sent, sizeof(magic) - 1 - sent);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) {
+            fprintf(stderr, "Failed to write bootloader reset sequence\n");
+            return EXIT_FAILURE;
+        }
+        sent += (size_t)count;
+    }
+    closeserial();
+    return delay_ms(delay) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

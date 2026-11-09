@@ -1,0 +1,146 @@
+--- a/include/hw/arm/bcm2838_peripherals.h
++++ b/include/hw/arm/bcm2838_peripherals.h
+@@ -15,6 +15,7 @@
+ #include "hw/misc/bcm2838_rng.h"
+ #include "hw/misc/bcm2838_pcie.h"
+ #include "hw/misc/bcm2838_genet.h"
++#include "hw/net/bcm2838_genet_net.h"
+ #include "hw/misc/bcm2711_avs_thermal.h"
+ 
+ /* SPI */
+@@ -70,6 +71,8 @@
+     BCM2838RngState rng200;
+     BCM2838PcieState pcie;
+     BCM2838GenetState genet;
++    BCM2838GenetNetState genet_net;
++    bool genet_network;
+     BCM2711AvsThermalState avs_thermal;
+     SDHCIState emmc2;
+     BCM2838GpioState gpio;
+--- a/hw/arm/bcm2838_peripherals.c
++++ b/hw/arm/bcm2838_peripherals.c
+@@ -10,6 +10,8 @@
+ #include "qapi/error.h"
+ #include "qemu/module.h"
+ #include "hw/arm/raspi_platform.h"
++#include "hw/qdev-properties.h"
++#include "net/net.h"
+ #include "hw/arm/bcm2838_peripherals.h"
+ 
+ #define CLOCK_ISP_OFFSET        0xc11000
+@@ -34,7 +36,6 @@
+ 
+     object_initialize_child(obj, "rng200", &s->rng200, TYPE_BCM2838_RNG);
+     object_initialize_child(obj, "pcie", &s->pcie, TYPE_BCM2838_PCIE);
+-    object_initialize_child(obj, "genet", &s->genet, TYPE_BCM2838_GENET);
+     object_initialize_child(obj, "avs-thermal", &s->avs_thermal,
+                             TYPE_BCM2711_AVS_THERMAL);
+ 
+@@ -94,11 +95,24 @@
+     /* Transparent CPU container; programmed PCIe windows provide its leaves. */
+     sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->pcie), 1, 0, 1);
+ 
+-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->genet), errp)) {
++    if (s->genet_network) {
++        object_initialize_child(OBJECT(s), "genet-net", &s->genet_net,
++                                TYPE_BCM2838_GENET_NET);
++    } else {
++        object_initialize_child(OBJECT(s), "genet", &s->genet, TYPE_BCM2838_GENET);
++    }
++    DeviceState *genet = s->genet_network ? DEVICE(&s->genet_net) : DEVICE(&s->genet);
++    if (s->genet_network) {
++        object_property_set_link(OBJECT(genet), "ram",
++            object_property_get_link(OBJECT(s_base), "ram", &error_abort),
++            &error_abort);
++        qemu_configure_nic_device(genet, true, NULL);
++    }
++    if (!sysbus_realize(SYS_BUS_DEVICE(genet), errp)) {
+         return;
+     }
+     memory_region_add_subregion(&s->peri_low_mr, 0x1580000,
+-                                sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->genet), 0));
++                                sysbus_mmio_get_region(SYS_BUS_DEVICE(genet), 0));
+ 
+     if (!sysbus_realize(SYS_BUS_DEVICE(&s->avs_thermal), errp)) {
+         return;
+@@ -232,6 +246,10 @@
+     create_unimp(s_base, &s->asb, "bcm2838-asb", BRDG_OFFSET, 0x24);
+ }
+ 
++static const Property bcm2838_network_properties[] = {
++    DEFINE_PROP_BOOL("genet-network", BCM2838PeripheralState, genet_network, false),
++};
++
+ static void bcm2838_peripherals_class_init(ObjectClass *oc, const void *data)
+ {
+     DeviceClass *dc = DEVICE_CLASS(oc);
+@@ -241,6 +259,7 @@
+     bc->peri_low_size = 0x2000000;
+     bc_base->peri_size = 0x1800000;
+     dc->realize = bcm2838_peripherals_realize;
++    device_class_set_props(dc, bcm2838_network_properties);
+ }
+ 
+ static const TypeInfo bcm2838_peripherals_type_info = {
+--- a/hw/arm/bcm2838.c
++++ b/hw/arm/bcm2838.c
+@@ -195,9 +195,11 @@
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 1,
+                        qdev_get_gpio_in(gicdev, 148));
+ 
+-    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->genet), 0,
++    sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
++                       DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_A));
+-    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->genet), 1,
++    sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
++                       DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 1,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_B));
+ 
+     for (int n = 0; n < 4; n++) {
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -80,6 +80,11 @@
+ 
+     for (int i = 0; i < ARRAY_SIZE(nodes_to_remove); i++) {
+         const char *dev_str = nodes_to_remove[i];
++        Raspi4bMachineState *s = RASPI4B_MACHINE(qdev_get_machine());
++        if (s->soc.peripherals.genet_network &&
++            !strcmp(dev_str, "brcm,bcm2711-genet-v5")) {
++            continue;
++        }
+ 
+         int offset = fdt_node_offset_by_compatible(fdt, -1, dev_str);
+         if (offset >= 0) {
+--- a/hw/net/meson.build
++++ b/hw/net/meson.build
+@@ -70,4 +70,6 @@
+ ), if_false: files('rocker/qmp-norocker.c'))
+ system_ss.add(files('rocker/rocker-hmp-cmds.c'))
+ 
++system_ss.add(when: 'CONFIG_RASPI', if_true: files('bcm2838_genet_net.c'))
++
+ subdir('can')
+--- a/hw/net/trace-events
++++ b/hw/net/trace-events
+@@ -528,3 +528,20 @@
+ ethlite_pkt_lost(uint32_t rx_ctrl) "rx_ctrl:0x%" PRIx32
+ ethlite_pkt_size_too_big(uint64_t size) "size:0x%" PRIx64
+ ethlite_pkt_tx_size_too_big(uint64_t size) "size:0x%" PRIx64
++
++# bcm2838_genet_net.c (upstream b63903e3)
++bcm2838_genet_read(unsigned int size, uint64_t offset, uint64_t value) "%u bytes @ 0x%04" PRIx64 ": 0x%016" PRIx64
++bcm2838_genet_write(unsigned int size, uint64_t offset, uint64_t value) "%u bytes @ 0x%04" PRIx64 ": 0x%016" PRIx64
++bcm2838_genet_can_receive(const char *state) "receive is %s"
++bcm2838_genet_receive(ssize_t bytes_received) "%zd bytes received"
++bcm2838_genet_phy_update_link(const char *link_state) "link is %s"
++bcm2838_genet_phy_reset(const char *status) "PHY reset %s"
++bcm2838_genet_reset(const char *status) "MAC reset %s"
++bcm2838_genet_mac_address(const char *info) "%s"
++bcm2838_genet_tx_dma(const char *dma_state) "TX DMA %s"
++bcm2838_genet_tx_dma_ring(uint32_t ring_en) "TX DMA enabled rings: 0x%05x"
++bcm2838_genet_tx_dma_ring_buf(uint32_t ring_buf_en) "TX DMA enabled ring buffers: 0x%05x"
++bcm2838_genet_tx_dma_ring_active(unsigned int ring, const char *ring_state) "ring %u is %s"
++bcm2838_genet_tx_request(unsigned int ring_idx, uint32_t prod_idx, uint32_t cons_idx) "ring %u, PROD_INDEX %u, CONS_INDEX %u"
++bcm2838_genet_tx(unsigned int ring_idx, uint64_t desc_idx, uint32_t desc_status, uint64_t data_addr) "ring %u, descriptor %" PRIu64 ": 0x%08x, data @ 0x%08" PRIx64
++bcm2838_genet_rx_dma_ring_active(unsigned int ring, const char *ring_state) "ring %u is %s"

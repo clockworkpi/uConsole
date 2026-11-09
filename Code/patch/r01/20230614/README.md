@@ -1,6 +1,14 @@
 ## Get Kernel
 
-Get kernel source from https://d1.docs.aw-ol.com/en/study/study_2getsdk/
+Get kernel source from https://docs.aw-ol.com/d1/en/study/study_2getsdk/
+
+The documented vendor download requires an Allwinner platform account and
+SSH public-key enrollment. Obtain the SDK through that supported workflow;
+this repository does not include it. The pinned kernel revision below and
+the matching T-Head toolchain are required to reproduce this build. A generic
+upstream RISC-V kernel or a different SDK revision is not equivalent to this
+vendor tree. No matching public GitHub commit was found during the build
+investigation; R01 compilation remains unverified until the SDK is available.
 
 based on allwinner D1_Tina_Open/tina_d1_h_v2.1/lichee/linux-5.4
 

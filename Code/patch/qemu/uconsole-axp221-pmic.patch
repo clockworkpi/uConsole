@@ -1,0 +1,64 @@
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -22,6 +22,8 @@
+ #include "hw/arm/boot.h"
+ #include "qom/object.h"
+ #include "hw/arm/bcm2838.h"
++#include "hw/i2c/i2c.h"
++#include "hw/irq.h"
+ #include <libfdt.h>
+ 
+ #define TYPE_RASPI4B_MACHINE MACHINE_TYPE_NAME("raspi4b")
+@@ -86,6 +88,32 @@
+     if (ram_size > UPPER_RAM_BASE) {
+         raspi_add_memory_node(fdt, UPPER_RAM_BASE, ram_size - UPPER_RAM_BASE);
+     }
++
++    /* ClockworkPi uConsole carrier: AXP221 PMIC on the CM4 I2C0 bus. */
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e205000", "status", "okay");
++    qemu_fdt_add_subnode(fdt, "/soc/i2c@7e205000/pmic@34");
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e205000/pmic@34",
++                            "compatible", "x-powers,axp221");
++    qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e205000/pmic@34", "reg", 0x34);
++    qemu_fdt_setprop_phandle(fdt, "/soc/i2c@7e205000/pmic@34",
++                            "interrupt-parent", "/soc/gpio@7e200000");
++    qemu_fdt_setprop_cells(fdt, "/soc/i2c@7e205000/pmic@34",
++                          "interrupts", 2, 8); /* GPIO2, level low */
++    qemu_fdt_add_subnode(fdt, "/soc/i2c@7e205000/pmic@34/adc");
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e205000/pmic@34/adc",
++                            "compatible", "x-powers,axp221-adc");
++    qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e205000/pmic@34/adc",
++                          "#io-channel-cells", 1);
++    qemu_fdt_add_subnode(fdt,
++        "/soc/i2c@7e205000/pmic@34/battery-power-supply");
++    qemu_fdt_setprop_string(fdt,
++        "/soc/i2c@7e205000/pmic@34/battery-power-supply", "compatible",
++        "x-powers,axp221-battery-power-supply");
++    qemu_fdt_add_subnode(fdt,
++        "/soc/i2c@7e205000/pmic@34/ac-power-supply");
++    qemu_fdt_setprop_string(fdt,
++        "/soc/i2c@7e205000/pmic@34/ac-power-supply", "compatible",
++        "x-powers,axp221-ac-power-supply");
+ }
+ 
+ static void raspi4b_machine_init(MachineState *machine)
+@@ -94,6 +122,7 @@
+     RaspiBaseMachineState *s_base = RASPI_BASE_MACHINE(machine);
+     RaspiBaseMachineClass *mc = RASPI_BASE_MACHINE_GET_CLASS(machine);
+     BCM2838State *soc = &s->soc;
++    I2CSlave *pmic;
+ 
+     s_base->binfo.modify_dtb = raspi4_modify_dtb;
+     s_base->binfo.board_id = mc->board_rev;
+@@ -102,6 +131,11 @@
+                             board_soc_type(mc->board_rev));
+ 
+     raspi_base_machine_init(machine, &soc->parent_obj);
++
++    pmic = i2c_slave_create_simple(soc->peripherals.parent_obj.i2c[0].bus,
++                                  "axp221_pmu", 0x34);
++    qdev_connect_gpio_out(DEVICE(pmic), 0,
++        qemu_irq_invert(qdev_get_gpio_in(DEVICE(&soc->peripherals.gpio), 2)));
+ }
+ 
+ static void raspi4b_machine_class_init(ObjectClass *oc, const void *data)

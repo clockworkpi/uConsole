@@ -1,0 +1,25 @@
+From: uConsole Workbench contributors
+Subject: [PATCH] ALSA: usb-audio: defer draining period notification until retirement
+
+prepare_playback_urb advances hwptr_done while filling a not-yet-submitted
+URB. At the final period boundary, notifying PCM core in DRAINING state can
+stop the endpoint. The endpoint checks its running state after preparation
+and then discards that final URB. Keep the notification pending until a
+retirement callback, after the newly prepared URB has been submitted. The
+existing keep_pending stop path can then finish the in-flight transfers.
+
+Candidate for the pinned 6.12.62 source; requires guest and hardware testing.
+
+--- a/sound/usb/pcm.c
++++ b/sound/usb/pcm.c
+@@ -1578,7 +1578,9 @@ static int prepare_playback_urb(struct snd_usb_substream *subs,
+ 		subs->trigger_tstamp_pending_update = false;
+ 	}
+ 
+-	if (period_elapsed && !subs->running && subs->lowlatency_playback) {
++	if (period_elapsed &&
++	    ((!subs->running && subs->lowlatency_playback) ||
++	     runtime->state == SNDRV_PCM_STATE_DRAINING)) {
+ 		subs->period_elapsed_pending = 1;
+ 		period_elapsed = 0;
+ 	}

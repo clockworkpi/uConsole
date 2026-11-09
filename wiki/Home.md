@@ -4,6 +4,10 @@ uConsole, developed by ClockworkPi, is a powerful, modular, and portable device 
 
 
 ## Quick Navigation
+
+* [Troubleshooting](https://github.com/clockworkpi/uConsole/wiki/Troubleshooting)
+  Keyboard layouts, text-console cursor, power-button handling, and hostname diagnostics.
+
 Below is the list of available Wiki pages. Click on the links to explore detailed guides and information:
 
 * [Compile RetroArch for CM4](https://github.com/clockworkpi/uConsole/wiki/Compile-retroarch-for-cm4)  

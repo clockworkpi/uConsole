@@ -62,6 +62,20 @@ tar zxvf LE20B04SIM7600G22_cpi_arm64.tar.gz
 cd LE20B04SIM7600G22_cpi_arm64
 ```
 
+Before entering bootloader mode, use the shared updater and its adjacent
+`modem-firmware-manifest.json` from a uConsole repository checkout to verify
+all package files (Python 3 required):
+
+```sh
+python3 /path/to/uConsole/Code/scripts/uconsole-modem-flash.py "$PWD" \
+  --version LE20B04SIM7600G22 --verify-only
+```
+
+A checksum match confirms the files belong together; it does not establish
+that this firmware matches a different modem model. The old bundled
+`flash.sh` does not stop on failed partition writes. Use the shared updater
+below instead. Keep the module powered throughout the operation.
+
 First, send the command `AT+BOOTLDR` to **/dev/ttyUSB3** to put the device into bootloader mode. At this point, the LED on the back will not light up.
 
 ```
@@ -71,12 +85,31 @@ echo -en  "AT+BOOTLDR\r\n" |sudo socat - /dev/ttyUSB3,crnl
 Next, use `sudo ./fastboot/bin/fastboot devices` to ensure that the device is detected. It should display something like `MDM9607 fastboot`.   
 If there is no device information, the operation must be halted.
 
-Then, use `./flash.sh` from the compressed package to flash the firmware, which should take about **40** seconds.
+Use the serial printed by `fastboot devices` (replace `MDM9607` below if
+different). First check device selection without writes:
 
-here is the output of flash.sh
+```sh
+sudo python3 /path/to/uConsole/Code/scripts/uconsole-modem-flash.py "$PWD" \
+  --version LE20B04SIM7600G22 --serial MDM9607
+```
+
+Then explicitly request flashing:
+
+```sh
+sudo python3 /path/to/uConsole/Code/scripts/uconsole-modem-flash.py "$PWD" \
+  --version LE20B04SIM7600G22 --serial MDM9607 --flash
+```
+
+The updater verifies every file, requires exactly one matching fastboot device,
+and stops at the first failed or timed-out operation. It requests reboot only
+after all partitions succeed. If it stops after writing some partitions,
+retain the output and investigate recovery before retrying or unplugging.
+The new updater has automated failure-path tests and offline checks against
+both bundled packages; physical modem validation remains outstanding.
+
+Example fastboot output from a previously completed transfer (timings vary):
 
 ```
-cpi@raspberrypi:~/LE20B04SIM7600G22_cpi $ ./flash.sh 
 sending 'aboot' (447 KB)...
 OKAY [  0.018s]
 writing 'aboot'...

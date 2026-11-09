@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 
 #include "glider.h"
@@ -45,10 +46,10 @@ Glider::GlideResult Glider::glide(millis_t delta) {
   error -= distance;
 
   if (sustain > 0) {
-    const auto sustained = min(sustain, (uint16_t)delta);
+    const auto sustained = std::min(sustain, (uint16_t)delta);
     sustain -= sustained;
   } else if (release > 0) {
-    const auto released = min(release, (uint16_t)delta);
+    const auto released = std::min(release, (uint16_t)delta);
     speed = speed * (release - released) / release;
     release -= released;
   } else {

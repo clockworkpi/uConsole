@@ -58,7 +58,7 @@ make headers_install INSTALL_HDR_PATH=../linux-headers-${KERNEL_VER}
 
 
 - All official uConsole OS images can be found here:  
-  [uConsole Images Repository](https://github.com/clockworkpi/uConsole/tree/master/images)
+  [uConsole OS image downloads](https://github.com/clockworkpi/uConsole#uconsole-os-images)
 
 
 - Happy hacking!

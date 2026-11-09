@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "tasks": {
+    "host-check": {
+      "kind": "host",
+      "argv": ["make", "check"]
+    },
+    "emulator-check": {
+      "kind": "host",
+      "argv": ["make", "check-emulator"]
+    },
+    "guest-summary": {
+      "kind": "guest",
+      "timeout": 30,
+      "script": "mountpoint -q /proc || mount -t proc proc /proc; mountpoint -q /sys || mount -t sysfs sys /sys; cat /etc/os-release; uname -a; grep MemTotal /proc/meminfo; cat /proc/bus/input/devices"
+    },
+    "guest-failed-services": {
+      "kind": "guest",
+      "timeout": 30,
+      "script": "systemctl --failed --no-pager --plain"
+    }
+  }
+}

@@ -1,0 +1,266 @@
+--- a/include/hw/arm/bcm2838_peripherals.h
++++ b/include/hw/arm/bcm2838_peripherals.h
+@@ -14,6 +14,7 @@
+ #include "hw/gpio/bcm2838_gpio.h"
+ #include "hw/misc/bcm2838_rng.h"
+ #include "hw/misc/bcm2838_pcie.h"
++#include "hw/misc/bcm2712_pcie2_contract.h"
+ #include "hw/misc/bcm2838_genet.h"
+ #include "hw/net/bcm2838_genet_net.h"
+ #include "hw/misc/bcm2711_avs_thermal.h"
+@@ -70,6 +71,8 @@
+ 
+     BCM2838RngState rng200;
+     BCM2838PcieState pcie;
++    BCM2712Pcie2ContractState pcie2;
++    bool pcie2_contract;
+     BCM2838GenetState genet;
+     BCM2838GenetNetState genet_net;
+     bool genet_network;
+--- a/hw/arm/bcm2838_peripherals.c
++++ b/hw/arm/bcm2838_peripherals.c
+@@ -35,7 +35,6 @@
+     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->peri_low_mr);
+ 
+     object_initialize_child(obj, "rng200", &s->rng200, TYPE_BCM2838_RNG);
+-    object_initialize_child(obj, "pcie", &s->pcie, TYPE_BCM2838_PCIE);
+     object_initialize_child(obj, "avs-thermal", &s->avs_thermal,
+                             TYPE_BCM2711_AVS_THERMAL);
+ 
+@@ -84,35 +83,52 @@
+     memory_region_add_subregion(&s_base->peri_mr, RNG_OFFSET,
+                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->rng200), 0));
+ 
+-    object_property_set_link(OBJECT(&s->pcie), "ram",
+-        object_property_get_link(OBJECT(s_base), "ram", &error_abort),
+-        &error_abort);
+-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie), errp)) {
+-        return;
+-    }
+-    memory_region_add_subregion(&s->peri_low_mr, 0x1500000,
+-                                sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie), 0));
+-    /* Transparent CPU container; programmed PCIe windows provide its leaves. */
+-    sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->pcie), 1, 0, 1);
+-
+-    if (s->genet_network) {
+-        object_initialize_child(OBJECT(s), "genet-net", &s->genet_net,
+-                                TYPE_BCM2838_GENET_NET);
+-    } else {
+-        object_initialize_child(OBJECT(s), "genet", &s->genet, TYPE_BCM2838_GENET);
+-    }
+-    DeviceState *genet = s->genet_network ? DEVICE(&s->genet_net) : DEVICE(&s->genet);
+-    if (s->genet_network) {
+-        object_property_set_link(OBJECT(genet), "ram",
++    if (s->pcie2_contract) {
++        object_initialize_child(OBJECT(s), "pcie2-host", &s->pcie2,
++                                TYPE_BCM2712_PCIE2_CONTRACT);
++        object_property_set_link(OBJECT(&s->pcie2), "ram",
+             object_property_get_link(OBJECT(s_base), "ram", &error_abort),
+             &error_abort);
+-        qemu_configure_nic_device(genet, true, NULL);
+-    }
+-    if (!sysbus_realize(SYS_BUS_DEVICE(genet), errp)) {
+-        return;
+-    }
+-    memory_region_add_subregion(&s->peri_low_mr, 0x1580000,
+-                                sysbus_mmio_get_region(SYS_BUS_DEVICE(genet), 0));
++        if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie2), errp)) { return; }
++        sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie2), 0, 0x1000120000ULL);
++        sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->pcie2), 1, 0, 1);
++        static const hwaddr addresses[] = { 0x1000130000ULL, 0x1000119500ULL,
++            0x1001504318ULL, 0x107d517c00ULL, 0x107d510700ULL };
++        for (int k = 0; k < ARRAY_SIZE(addresses); k++) {
++            sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie2), k + 2, addresses[k]);
++        }
++    } else {
++        object_initialize_child(OBJECT(s), "pcie", &s->pcie, TYPE_BCM2838_PCIE);
++        object_property_set_link(OBJECT(&s->pcie), "ram",
++            object_property_get_link(OBJECT(s_base), "ram", &error_abort),
++            &error_abort);
++        if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie), errp)) {
++            return;
++        }
++        memory_region_add_subregion(&s->peri_low_mr, 0x1500000,
++                                    sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie), 0));
++        /* Transparent CPU container; programmed PCIe windows provide its leaves. */
++        sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->pcie), 1, 0, 1);
++    
++        if (s->genet_network) {
++            object_initialize_child(OBJECT(s), "genet-net", &s->genet_net,
++                                    TYPE_BCM2838_GENET_NET);
++        } else {
++            object_initialize_child(OBJECT(s), "genet", &s->genet, TYPE_BCM2838_GENET);
++        }
++        DeviceState *genet = s->genet_network ? DEVICE(&s->genet_net) : DEVICE(&s->genet);
++        if (s->genet_network) {
++            object_property_set_link(OBJECT(genet), "ram",
++                object_property_get_link(OBJECT(s_base), "ram", &error_abort),
++                &error_abort);
++            qemu_configure_nic_device(genet, true, NULL);
++        }
++        if (!sysbus_realize(SYS_BUS_DEVICE(genet), errp)) {
++            return;
++        }
++        memory_region_add_subregion(&s->peri_low_mr, 0x1580000,
++                                    sysbus_mmio_get_region(SYS_BUS_DEVICE(genet), 0));
++    }
+ 
+     if (!sysbus_realize(SYS_BUS_DEVICE(&s->avs_thermal), errp)) {
+         return;
+@@ -247,6 +263,7 @@
+ }
+ 
+ static const Property bcm2838_network_properties[] = {
++    DEFINE_PROP_BOOL("pcie2-contract", BCM2838PeripheralState, pcie2_contract, false),
+     DEFINE_PROP_BOOL("genet-network", BCM2838PeripheralState, genet_network, false),
+ };
+ 
+--- a/hw/arm/bcm2838.c
++++ b/hw/arm/bcm2838.c
+@@ -25,7 +25,7 @@
+ /* Number of external interrupt lines to configure the GIC with */
+ #define GIC_NUM_IRQS                192
+ 
+-#define PPI(cpu, irq) (GIC_NUM_IRQS + (cpu) * GIC_INTERNAL + GIC_NR_SGIS + irq)
++#define PPI(cpu, irq) (num_irqs + (cpu) * GIC_INTERNAL + GIC_NR_SGIS + irq)
+ 
+ #define GIC_BASE_OFS                0x0000
+ #define GIC_DIST_OFS                0x1000
+@@ -72,6 +72,7 @@
+         BCM_SOC_PERIPHERALS_BASE(&s->peripherals);
+ 
+     DeviceState *gicdev = NULL;
++    unsigned num_irqs = ps->pcie2_contract ? 256 : GIC_NUM_IRQS;
+ 
+     if (!bcm283x_common_realize(dev, ps_base, errp)) {
+         return;
+@@ -114,7 +115,7 @@
+     }
+ 
+     if (!object_property_set_uint(OBJECT(&s->gic), "num-irq",
+-                                  GIC_NUM_IRQS + GIC_INTERNAL, errp)) {
++                                  num_irqs + GIC_INTERNAL, errp)) {
+         return;
+     }
+ 
+@@ -189,22 +190,39 @@
+     sysbus_connect_irq(SYS_BUS_DEVICE(&ps->rng200), 0,
+                        qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_RNG200));
+ 
+-    /* PCIe controller and MSI banks (no downstream endpoint in this profile). */
+-    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 0,
+-                       qdev_get_gpio_in(gicdev, 147));
+-    sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 1,
+-                       qdev_get_gpio_in(gicdev, 148));
+-
+-    sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
+-                       DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 0,
+-                       qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_A));
+-    sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
+-                       DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 1,
+-                       qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_B));
+-
+-    for (int n = 0; n < 4; n++) {
+-        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), n + 2,
+-                           qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_PCI_INT_A + n));
++    if (ps->pcie2_contract) {
++        /* No old PCIe/GENET source shares MIP SPI128..191. */
++        for (int n = 0; n < 64; n++) {
++            sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie2), n + 6,
++                               qdev_get_gpio_in(gicdev, 128 + n));
++        }
++        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie2), 0,
++                           qdev_get_gpio_in(gicdev, 233));
++        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie2), 1,
++                           qdev_get_gpio_in(gicdev, 234));
++        for (int n = 0; n < 4; n++) {
++            sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie2), n + 2,
++                               qdev_get_gpio_in(gicdev, 229 + n));
++        }
++    } else {
++        /* PCIe controller and MSI banks (no downstream endpoint in this profile). */
++        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 0,
++                           qdev_get_gpio_in(gicdev, 147));
++        sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), 1,
++                           qdev_get_gpio_in(gicdev, 148));
++    
++        sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
++                           DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 0,
++                           qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_A));
++        sysbus_connect_irq(SYS_BUS_DEVICE(ps->genet_network ?
++                           DEVICE(&ps->genet_net) : DEVICE(&ps->genet)), 1,
++                           qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_GENET_B));
++    
++        for (int n = 0; n < 4; n++) {
++            sysbus_connect_irq(SYS_BUS_DEVICE(&ps->pcie), n + 2,
++                               qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_PCI_INT_A + n));
++        }
++    
+     }
+ 
+     /* Connect UART0 to the interrupt controller */
+@@ -258,7 +276,7 @@
+                           qdev_get_gpio_in(gicdev, GIC_SPI_INTERRUPT_DMA_9_10));
+ 
+     /* Pass through inbound GPIO lines to the GIC */
+-    qdev_init_gpio_in(dev, bcm2838_gic_set_irq, GIC_NUM_IRQS);
++    qdev_init_gpio_in(dev, bcm2838_gic_set_irq, num_irqs);
+ 
+     /* Pass through outbound IRQ lines from the GIC */
+     qdev_pass_gpios(DEVICE(&s->gic), DEVICE(&s->peripherals), NULL);
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -81,11 +81,13 @@
+     for (int i = 0; i < ARRAY_SIZE(nodes_to_remove); i++) {
+         const char *dev_str = nodes_to_remove[i];
+         Raspi4bMachineState *s = RASPI4B_MACHINE(qdev_get_machine());
+-        if (s->soc.peripherals.genet_network &&
++        if (!s->soc.peripherals.pcie2_contract &&
++            s->soc.peripherals.genet_network &&
+             !strcmp(dev_str, "brcm,bcm2711-genet-v5")) {
+             continue;
+         }
+-        if (s->soc.peripherals.pcie.connected_xhci &&
++        if (!s->soc.peripherals.pcie2_contract &&
++            s->soc.peripherals.pcie.connected_xhci &&
+             !strcmp(dev_str, "brcm,bcm2711-pcie")) {
+             continue;
+         }
+@@ -259,6 +261,19 @@
+     .class_init = raspi4b_capacity_class_init,
+     .class_data = &raspi4b_8g_revision,
+ };
++/* PCI address zero is legal for the selected outbound window. Keep this
++ * existing QEMU PCI policy isolated to a clearly synthetic machine class. */
++static void raspi4b_pcie2_contract_class_init(ObjectClass *oc, const void *data)
++{
++    MachineClass *mc = MACHINE_CLASS(oc);
++    mc->desc = "Synthetic PCIe2 contract on BCM2711 8GiB substrate (not Pi500/RP1)";
++    mc->pci_allow_0_address = true;
++}
++static const TypeInfo raspi4b_pcie2_contract_machine_type = {
++    .name = MACHINE_TYPE_NAME("raspi4b-pcie2-contract"),
++    .parent = MACHINE_TYPE_NAME("raspi4b-8g"),
++    .class_init = raspi4b_pcie2_contract_class_init,
++};
+ #endif
+ 
+ static void raspi4b_machine_register_type(void)
+@@ -267,6 +282,7 @@
+ #if HOST_LONG_BITS == 64
+     type_register_static(&raspi4b_4g_machine_type);
+     type_register_static(&raspi4b_8g_machine_type);
++    type_register_static(&raspi4b_pcie2_contract_machine_type);
+ #endif
+ }
+ 
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -92,6 +92,7 @@
+   'bcm2838_rng.c',
+   'bcm2711_avs_thermal.c',
+   'bcm2838_pcie.c',
++  'bcm2712_pcie2_contract.c',
+   'bcm2838_genet.c',
+   'bcm2835_thermal.c',
+   'bcm2835_cprman.c',

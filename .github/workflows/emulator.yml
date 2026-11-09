@@ -1,0 +1,48 @@
+name: Host CI
+
+on:
+  workflow_call:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux tests and GUI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y shellcheck xvfb python3-tk qemu-utils dosfstools e2fsprogs libasound2-dev
+      - name: Run complete tests with GUI and shell checks
+        timeout-minutes: 20
+        run: xvfb-run -a make check PYTHON=/usr/bin/python3
+
+  macos:
+    name: macOS complete tests and GUI
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native test dependencies
+        run: brew install shellcheck python-tk@3.12 qemu dosfstools e2fsprogs
+      - name: Run complete tests and shell checks
+        timeout-minutes: 20
+        run: make check PYTHON="$(brew --prefix)/bin/python3.12"
+
+  windows:
+    name: Windows host-tool portability
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_emulator.py -v

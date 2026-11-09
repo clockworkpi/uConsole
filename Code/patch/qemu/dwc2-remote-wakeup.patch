@@ -1,0 +1,34 @@
+From: uConsole Workbench contributors
+Subject: [PATCH] usb: dwc2: signal remote wakeup and permit resume completion
+
+Remote wakeup is WKUPINT, not a port-change event. Raising PRTINT without
+any HPRT change bit leaves the Linux port interrupt handler with nothing
+to acknowledge and can starve the guest until its watchdog expires.
+Allow software to end resume signaling; that transition also ends suspend.
+
+--- a/hw/usb/hcd-dwc2.c
++++ b/hw/usb/hcd-dwc2.c
+@@ -491,7 +491,7 @@ static void dwc2_wakeup(USBPort *port)
+ 
+     if (s->hprt0 & HPRT0_SUSP) {
+         s->hprt0 |= HPRT0_RES;
+-        dwc2_raise_global_irq(s, GINTSTS_PRTINT);
++        dwc2_raise_global_irq(s, GINTSTS_WKUPINT);
+     }
+ 
+     qemu_bh_schedule(s->async_bh);
+@@ -905,8 +905,12 @@ static void dwc2_hreg0_write(void *ptr, hwaddr addr, uint64_t val,
+         /* don't allow clearing of read-only bits */
+         val |= old & (HPRT0_SPD_MASK | HPRT0_LNSTS_MASK | HPRT0_OVRCURRACT |
+                       HPRT0_CONNSTS);
+-        /* don't allow clearing of self-clearing bits */
+-        val |= old & (HPRT0_SUSP | HPRT0_RES);
++        /* Suspend ends when software completes resume signaling or resets. */
++        val |= old & HPRT0_SUSP;
++        if (((old & HPRT0_RES) && !(val & HPRT0_RES)) ||
++            (val & HPRT0_RST)) {
++            val &= ~HPRT0_SUSP;
++        }
+         /* don't allow setting of self-setting bits */
+         if (!(old & HPRT0_ENA) && (val & HPRT0_ENA)) {
+             val &= ~HPRT0_ENA;

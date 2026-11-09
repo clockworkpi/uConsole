@@ -1,0 +1,317 @@
+--- a/hw/usb/meson.build
++++ b/hw/usb/meson.build
+@@ -36,3 +36,4 @@
+ system_ss.add(when: 'CONFIG_USB_HUB', if_true: files('dev-hub.c'))
+ system_ss.add(when: 'CONFIG_USB_HID', if_true: files('dev-hid.c'))
++system_ss.add(when: 'CONFIG_USB_HID', if_true: files('dev-uconsole.c'))
+ system_ss.add(when: 'CONFIG_USB_TABLET_WACOM', if_true: files('dev-wacom.c'))
+--- /dev/null
++++ b/hw/usb/dev-uconsole.c
+@@ -0,0 +1,307 @@
++/*
++ * uConsole keyboard composite USB transport (functional model, not MCU emulation).
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * Descriptor templates/report bytes: STM32F1 2021.2.22 compiled firmware
++ * df83700173c1fc180d59c8b01b710dc91e244c55af0f3c87f61edb6de5525c67.
++ * Runtime substitutions follow HID-first, CDC-second registration. No hardware
++ * capture qualification. Input state machine and bootloader are not implemented.
++ */
++#include "qemu/osdep.h"
++#include "qapi/error.h"
++#include "qemu/module.h"
++#include "hw/usb.h"
++#include "migration/vmstate.h"
++#include "qom/object.h"
++#include "desc.h"
++
++#define TYPE_USB_UCONSOLE "usb-uconsole-keyboard"
++OBJECT_DECLARE_SIMPLE_TYPE(UConsoleUSB, USB_UCONSOLE)
++
++struct UConsoleUSB {
++    USBDevice parent_obj;
++    uint8_t reports[32][13], sizes[32];
++    unsigned head, count, epoch;
++    uint8_t leds, protocol, line[7], control_lines, dtr_state;
++    uint8_t rx[256];
++    unsigned rx_used;
++    bool reset_requested;
++};
++
++static const uint8_t report_descriptor[] = {
++    0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01, 0x85, 0x03, 0x15, 0x00, 0x26, 0xff,
++    0x03, 0x19, 0x00, 0x2a, 0xff, 0x03, 0x75, 0x10, 0x95, 0x01, 0x81, 0x00,
++    0xc0, 0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x85, 0x02, 0x05, 0x07, 0x19,
++    0xe0, 0x29, 0xe7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81,
++    0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x03, 0x95, 0x06, 0x75, 0x08, 0x15,
++    0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0x05,
++    0x08, 0x19, 0x01, 0x29, 0x08, 0x95, 0x08, 0x75, 0x01, 0x91, 0x02, 0xc0,
++    0x05, 0x01, 0x09, 0x04, 0xa1, 0x01, 0x85, 0x14, 0x15, 0x00, 0x25, 0x01,
++    0x75, 0x01, 0x95, 0x20, 0x05, 0x09, 0x19, 0x01, 0x29, 0x20, 0x81, 0x02,
++    0x15, 0x00, 0x25, 0x07, 0x35, 0x00, 0x46, 0x3b, 0x01, 0x75, 0x04, 0x95,
++    0x01, 0x65, 0x14, 0x05, 0x01, 0x09, 0x39, 0x81, 0x42, 0x05, 0x01, 0x09,
++    0x01, 0xa1, 0x00, 0x15, 0x00, 0x26, 0xff, 0x03, 0x75, 0x0a, 0x95, 0x04,
++    0x09, 0x30, 0x09, 0x31, 0x09, 0x33, 0x09, 0x34, 0x81, 0x02, 0xc0, 0x15,
++    0x00, 0x26, 0xff, 0x03, 0x75, 0x0a, 0x95, 0x02, 0x09, 0x36, 0x09, 0x36,
++    0x81, 0x02, 0xc0, 0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x85, 0x01, 0x09,
++    0x01, 0xa1, 0x00, 0x05, 0x09, 0x19, 0x01, 0x29, 0x08, 0x15, 0x00, 0x25,
++    0x01, 0x95, 0x08, 0x75, 0x01, 0x81, 0x02, 0x05, 0x01, 0x09, 0x30, 0x09,
++    0x31, 0x09, 0x38, 0x15, 0x81, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x03, 0x81,
++    0x06, 0xc0, 0xc0,
++};
++
++/* Configuration order and CDC functional bytes match the compiled templates. */
++static const uint8_t config_descriptor[] = {
++    0x09, 0x02, 0x64, 0x00, 0x03, 0x01, 0x00, 0xc0, 0x32, 0x09, 0x04, 0x00,
++    0x00, 0x01, 0x03, 0x01, 0x00, 0x00, 0x09, 0x21, 0x10, 0x01, 0x00, 0x01,
++    0x22, 0xdb, 0x00, 0x07, 0x05, 0x81, 0x03, 0x40, 0x00, 0x0a, 0x08, 0x0b,
++    0x01, 0x02, 0x02, 0x02, 0x01, 0x02, 0x09, 0x04, 0x01, 0x00, 0x01, 0x02,
++    0x02, 0x01, 0x00, 0x05, 0x24, 0x00, 0x01, 0x10, 0x05, 0x24, 0x01, 0x03,
++    0x02, 0x04, 0x24, 0x02, 0x06, 0x05, 0x24, 0x06, 0x01, 0x02, 0x07, 0x05,
++    0x83, 0x03, 0x10, 0x00, 0xff, 0x09, 0x04, 0x02, 0x00, 0x02, 0x0a, 0x00,
++    0x00, 0x00, 0x07, 0x05, 0x02, 0x02, 0x40, 0x00, 0x00, 0x07, 0x05, 0x82,
++    0x02, 0x40, 0x00, 0x00,
++};
++
++static const USBDescStrings strings = {
++    [1] = "ClockworkPI", [2] = "uConsole", [3] = "20230713",
++};
++
++static const USBDescDevice device = {
++    .bcdUSB = 0x0200, .bDeviceProtocol = 1,
++    .bMaxPacketSize0 = 64, .bNumConfigurations = 1,
++    .confs = (USBDescConfig[]) {{
++        .bNumInterfaces = 3, .bConfigurationValue = 1,
++        .bmAttributes = 0xc0, .bMaxPower = 50, .nif = 3,
++        .ifs = (USBDescIface[]) {
++            { .bInterfaceNumber = 0, .bNumEndpoints = 1,
++              .bInterfaceClass = 3, .bInterfaceSubClass = 1,
++              .eps = (USBDescEndpoint[]) {{
++                  .bEndpointAddress = 0x81, .bmAttributes = 3,
++                  .wMaxPacketSize = 64, .bInterval = 10,
++              }} },
++            { .bInterfaceNumber = 1, .bNumEndpoints = 1,
++              .bInterfaceClass = 2, .bInterfaceSubClass = 2,
++              .bInterfaceProtocol = 1,
++              .eps = (USBDescEndpoint[]) {{
++                  .bEndpointAddress = 0x83, .bmAttributes = 3,
++                  .wMaxPacketSize = 16, .bInterval = 255,
++              }} },
++            { .bInterfaceNumber = 2, .bNumEndpoints = 2,
++              .bInterfaceClass = 10,
++              .eps = (USBDescEndpoint[]) {
++                  { .bEndpointAddress = 0x02, .bmAttributes = 2,
++                    .wMaxPacketSize = 64 },
++                  { .bEndpointAddress = 0x82, .bmAttributes = 2,
++                    .wMaxPacketSize = 64 },
++              } },
++        },
++    }},
++};
++
++static const USBDesc desc = {
++    .id = { .idVendor = 0x1eaf, .idProduct = 0x0024, .bcdDevice = 0x0200,
++            .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3 },
++    .full = &device, .str = strings,
++};
++
++static void reply(USBPacket *p, uint8_t *data, int length,
++                  const uint8_t *source, unsigned size)
++{
++    p->actual_length = MIN(length, size);
++    memcpy(data, source, p->actual_length);
++}
++
++static void uconsole_reset(USBDevice *dev)
++{
++    UConsoleUSB *s = USB_UCONSOLE(dev);
++    s->head = s->count = s->rx_used = 0;
++    s->epoch++;
++    usb_desc_init(dev);
++    /* USB bus reset clears transport queues, not firmware line-coding/DTR state. */
++}
++
++static void uconsole_control(USBDevice *dev, USBPacket *p, int request,
++                             int value, int index, int length, uint8_t *data)
++{
++    UConsoleUSB *s = USB_UCONSOLE(dev);
++    if (request == 0x8006 && value == 0x0200 && index == 0) {
++        reply(p, data, length, config_descriptor, sizeof(config_descriptor));
++        return;
++    }
++    if (index == 0 && request == 0x8106 && value == 0x2200) {
++        reply(p, data, length, report_descriptor, sizeof(report_descriptor));
++        return;
++    }
++    if (index == 0 && request == 0x8106 && value == 0x2100) {
++        /* Core returns its unpatched static HID header on this request. */
++        static const uint8_t hid[] = {9, 0x21, 0x10, 1, 0, 1, 0x22, 0, 0};
++        reply(p, data, length, hid, sizeof(hid));
++        return;
++    }
++    if (usb_desc_handle_control(dev, p, request, value, index, length, data) >= 0) {
++        return;
++    }
++    if (index == 0) {
++        if (request == 0x2109 && value == 0x0202 && length == 2 && data[0] == 2) {
++            s->leds = data[1];
++            return;
++        }
++        if (request == 0x210b && length == 0 && value <= 255) {
++            s->protocol = value;
++            return;
++        }
++        /* This unusual standard-interface GET_PROTOCOL matches the pinned core. */
++        if (request == 0x8103 && length == 1) {
++            reply(p, data, length, &s->protocol, 1);
++            return;
++        }
++    }
++    if (index == 1) {
++        if (request == 0xa121 && value == 0) {
++            reply(p, data, length, s->line, sizeof(s->line));
++            return;
++        }
++        if (request == 0x2120 && value == 0 && length == 7) {
++            memcpy(s->line, data, 7);
++            return;
++        }
++        if (request == 0x2102 && length == 0) {
++            return; /* SET_COMM_FEATURE accepted but ignored by the core. */
++        }
++        if (request == 0x2122 && length == 0) {
++            bool dtr = value & 1;
++            s->control_lines = value & 3;
++            s->dtr_state = dtr ? 1 : (s->dtr_state == 1 ? 2 : 3);
++            if (s->dtr_state == 2 && ldl_le_p(s->line) == 1200) {
++                s->reset_requested = true;
++            }
++            return;
++        }
++    }
++    p->status = USB_RET_STALL;
++}
++
++static void uconsole_data(USBDevice *dev, USBPacket *p)
++{
++    UConsoleUSB *s = USB_UCONSOLE(dev);
++    unsigned ep = p->ep->nr;
++    if (p->pid == USB_TOKEN_IN && ep == 1) {
++        if (!s->count) {
++            p->status = USB_RET_NAK;
++            return;
++        }
++        if (p->iov.size < s->sizes[s->head]) {
++            p->status = USB_RET_BABBLE;
++            return;
++        }
++        usb_packet_copy(p, s->reports[s->head], s->sizes[s->head]);
++        s->head = (s->head + 1) % 32;
++        s->count--;
++        return;
++    }
++    if (p->pid == USB_TOKEN_OUT && ep == 2) {
++        /* Firmware does not consume CDC data in loop(); preserve backpressure. */
++        if (p->iov.size > 64) {
++            p->status = USB_RET_STALL;
++            return;
++        }
++        if (s->rx_used >= 192) {
++            p->status = USB_RET_NAK;
++            return;
++        }
++        usb_packet_copy(p, s->rx + s->rx_used, p->iov.size);
++        s->rx_used += p->iov.size;
++        if (s->dtr_state == 2) {
++            s->dtr_state = 3;
++            if (s->rx_used >= 4 && !memcmp(s->rx + s->rx_used - 4, "1EAF", 4)) {
++                s->reset_requested = true;
++            }
++        }
++        return;
++    }
++    if (p->pid == USB_TOKEN_IN && (ep == 2 || ep == 3)) {
++        p->status = USB_RET_NAK; /* No application CDC output or notifications. */
++        return;
++    }
++    p->status = USB_RET_STALL;
++}
++
++static void inject_report(Object *obj, const char *hex, Error **errp)
++{
++    UConsoleUSB *s = USB_UCONSOLE(obj);
++    uint8_t data[13];
++    unsigned length = strlen(hex), expected, slot;
++    if (length < 2 || length > 26 || length % 2) {
++        error_setg(errp, "Expected one hex HID report including its report ID");
++        return;
++    }
++    for (unsigned i = 0; i < length / 2; i++) {
++        int a = g_ascii_xdigit_value(hex[2 * i]);
++        int b = g_ascii_xdigit_value(hex[2 * i + 1]);
++        if (a < 0 || b < 0) {
++            error_setg(errp, "Invalid hex HID report");
++            return;
++        }
++        data[i] = a * 16 + b;
++    }
++    expected = data[0] == 1 ? 5 : data[0] == 2 ? 9 :
++               data[0] == 3 ? 3 : data[0] == 20 ? 13 : 0;
++    if (!expected || length / 2 != expected) {
++        error_setg(errp, "Incorrect report ID or size");
++        return;
++    }
++    if (USB_DEVICE(s)->configuration != 1 || s->count == 32) {
++        error_setg(errp, "Device is not configured or HID queue is full");
++        return;
++    }
++    slot = (s->head + s->count) % 32;
++    memcpy(s->reports[slot], data, expected);
++    s->sizes[slot] = expected;
++    s->count++;
++    usb_wakeup(usb_ep_get(USB_DEVICE(s), USB_TOKEN_IN, 1), 0);
++}
++
++static char *transport_state(Object *obj, Error **errp)
++{
++    UConsoleUSB *s = USB_UCONSOLE(obj);
++    return g_strdup_printf("queued=%u leds=%u cdc-rx=%u lines=%u reset-requested=%u configuration=%u epoch=%u",
++                           s->count, s->leds, s->rx_used,
++                           s->control_lines, s->reset_requested,
++                           USB_DEVICE(s)->configuration, s->epoch);
++}
++
++static void uconsole_realize(USBDevice *dev, Error **errp)
++{
++    UConsoleUSB *s = USB_UCONSOLE(dev);
++    static const uint8_t initial_line[] = {0, 0xc2, 1, 0, 0, 0, 8};
++    memcpy(s->line, initial_line, sizeof(initial_line));
++    usb_desc_init(dev);
++    uconsole_reset(dev);
++}
++
++static const VMStateDescription state = {
++    .name = "usb-uconsole-keyboard", .unmigratable = 1,
++};
++
++static void uconsole_class_init(ObjectClass *klass, const void *data)
++{
++    USBDeviceClass *uc = USB_DEVICE_CLASS(klass);
++    DEVICE_CLASS(klass)->vmsd = &state;
++    uc->product_desc = "uConsole keyboard (experimental composite transport)";
++    uc->usb_desc = &desc;
++    uc->realize = uconsole_realize;
++    uc->handle_reset = uconsole_reset;
++    uc->handle_control = uconsole_control;
++    uc->handle_data = uconsole_data;
++    object_class_property_add_str(klass, "inject-report", NULL, inject_report);
++    object_class_property_add_str(klass, "transport-state", transport_state, NULL);
++}
++
++static const TypeInfo info = {
++    .name = TYPE_USB_UCONSOLE, .parent = TYPE_USB_DEVICE,
++    .instance_size = sizeof(UConsoleUSB), .class_init = uconsole_class_init,
++};
++
++static void register_types(void) { type_register_static(&info); }
++type_init(register_types)

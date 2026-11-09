@@ -1,0 +1,71 @@
+--- a/hw/usb/dev-uconsole.c
++++ b/hw/usb/dev-uconsole.c
+@@ -25,2 +25,3 @@
+     unsigned head, count, epoch;
++    uint64_t delivered_reports;
+     uint8_t leds, protocol, line[7], control_lines, dtr_state;
+@@ -200,3 +201,6 @@
+         usb_packet_copy(p, s->reports[s->head], s->sizes[s->head]);
++        if (s->delivered_reports != UINT64_MAX) {
++            s->delivered_reports++;
++        }
+         s->head = (s->head + 1) % 32;
+         s->count--;
+@@ -276,3 +280,6 @@
+     UConsoleUSB *s = USB_UCONSOLE(dev);
+     static const uint8_t initial_line[] = {0, 0xc2, 1, 0, 0, 0, 8};
++    /* Host observation only: cumulative successful HID IN deliveries. */
++    object_property_add_uint64_ptr(OBJECT(s), "delivered-reports",
++                                   &s->delivered_reports, OBJ_PROP_FLAG_READ);
+     memcpy(s->line, initial_line, sizeof(initial_line));
+--- a/include/hw/display/bcm2835_fb.h
++++ b/include/hw/display/bcm2835_fb.h
+@@ -49,3 +49,5 @@
+     bool lock, invalidate, pending;
++    /* Host-side diagnostic counter; deliberately not guest/migration state. */
++    uint64_t display_updates;
+ 
+     BCM2835FBConfig config;
+--- a/hw/display/bcm2835_fb.c
++++ b/hw/display/bcm2835_fb.c
+@@ -209,3 +209,6 @@
+     if (first >= 0) {
++        if (s->display_updates != UINT64_MAX) {
++            s->display_updates++;
++        }
+         dpy_gfx_update(s->con, 0, first, s->config.xres,
+                        last - first + 1);
+@@ -385,3 +388,5 @@
+     BCM2835FBState *s = BCM2835_FB(obj);
+ 
++    object_property_add_uint64_ptr(obj, "display-updates", &s->display_updates,
++                                   OBJ_PROP_FLAG_READ);
+     memory_region_init_io(&s->iomem, obj, &bcm2835_fb_ops, s, TYPE_BCM2835_FB,
+--- a/hw/sd/sd.c
++++ b/hw/sd/sd.c
+@@ -142,3 +142,5 @@
+ struct SDState {
+     DeviceState parent_obj;
++    /* Host observations, not card registers or migratable device state. */
++    uint64_t observed_read_bytes, observed_write_bytes;
+ 
+@@ -1118,3 +1118,5 @@
+     if (!sd->blk || blk_pread(sd->blk, addr, len, sd->data, 0) < 0) {
+         fprintf(stderr, "sd_blk_read: read error on host side\n");
++    } else if (sd->observed_read_bytes <= UINT64_MAX - len) {
++        sd->observed_read_bytes += len;
+     }
+@@ -1127,3 +1129,5 @@
+     if (!sd->blk || blk_pwrite(sd->blk, addr, len, sd->data, 0) < 0) {
+         fprintf(stderr, "sd_blk_write: write error on host side\n");
++    } else if (sd->observed_write_bytes <= UINT64_MAX - len) {
++        sd->observed_write_bytes += len;
+     }
+@@ -3023,3 +3029,7 @@
+     SDCardClass *sc = SDMMC_COMMON_GET_CLASS(sd);
+ 
++    object_property_add_uint64_ptr(obj, "observed-read-bytes",
++                                   &sd->observed_read_bytes, OBJ_PROP_FLAG_READ);
++    object_property_add_uint64_ptr(obj, "observed-write-bytes",
++                                   &sd->observed_write_bytes, OBJ_PROP_FLAG_READ);
+     sd->proto = sc->proto;

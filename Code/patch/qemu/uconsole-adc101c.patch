@@ -1,0 +1,52 @@
+--- a/hw/adc/meson.build
++++ b/hw/adc/meson.build
+@@ -1,3 +1,4 @@
++system_ss.add(when: 'CONFIG_RASPI', if_true: files('adc101c.c'))
+ system_ss.add(when: 'CONFIG_STM32F2XX_ADC', if_true: files('stm32f2xx_adc.c'))
+ system_ss.add(when: 'CONFIG_ASPEED_SOC', if_true: files('aspeed_adc.c'))
+ system_ss.add(when: 'CONFIG_NPCM7XX', if_true: files('npcm7xx_adc.c'))
+--- a/hw/arm/raspi4b.c
++++ b/hw/arm/raspi4b.c
+@@ -114,6 +114,22 @@
+     qemu_fdt_setprop_string(fdt,
+         "/soc/i2c@7e205000/pmic@34/ac-power-supply", "compatible",
+         "x-powers,axp221-ac-power-supply");
++    /* Working ADC profile; this is not a claim that every carrier has one. */
++    uint32_t reference = qemu_fdt_alloc_phandle(fdt);
++    qemu_fdt_add_subnode(fdt, "/uconsole-adc-reference");
++    qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "compatible", "regulator-fixed");
++    qemu_fdt_setprop_string(fdt, "/uconsole-adc-reference", "regulator-name", "adc-reference");
++    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "phandle", reference);
++    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-min-microvolt", 3300000);
++    qemu_fdt_setprop_cell(fdt, "/uconsole-adc-reference", "regulator-max-microvolt", 3300000);
++    qemu_fdt_setprop(fdt, "/uconsole-adc-reference", "regulator-always-on", NULL, 0);
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000", "status", "okay");
++    qemu_fdt_add_subnode(fdt, "/soc/i2c@7e804000/adc@54");
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000/adc@54", "compatible", "ti,adc101c");
++    qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e804000/adc@54", "reg", 0x54);
++    qemu_fdt_setprop_cell(fdt, "/soc/i2c@7e804000/adc@54", "vref-supply", reference);
++    qemu_fdt_setprop_string(fdt, "/soc/i2c@7e804000/adc@54", "status", "okay");
++
+ }
+ 
+ static void raspi4b_machine_init(MachineState *machine)
+@@ -123,6 +139,7 @@
+     RaspiBaseMachineClass *mc = RASPI_BASE_MACHINE_GET_CLASS(machine);
+     BCM2838State *soc = &s->soc;
+     I2CSlave *pmic;
++    I2CSlave *adc;
+ 
+     s_base->binfo.modify_dtb = raspi4_modify_dtb;
+     s_base->binfo.board_id = mc->board_rev;
+@@ -136,6 +153,11 @@
+                                   "axp221_pmu", 0x34);
+     qdev_connect_gpio_out(DEVICE(pmic), 0,
+         qemu_irq_invert(qdev_get_gpio_in(DEVICE(&soc->peripherals.gpio), 2)));
++    adc = i2c_slave_new("adc101c", 0x54);
++    object_property_add_child(OBJECT(machine), "battery-adc", OBJECT(adc));
++    i2c_slave_realize_and_unref(adc, soc->peripherals.parent_obj.i2c[1].bus,
++                              &error_fatal);
++    /* ALERT has no verified carrier GPIO route; expose state, do not invent one. */
+ }
+ 
+ static void raspi4b_machine_class_init(ObjectClass *oc, const void *data)

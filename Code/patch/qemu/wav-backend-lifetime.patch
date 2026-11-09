@@ -1,0 +1,179 @@
+From: uConsole Workbench contributors
+Subject: [PATCH] audio/wav: retain recording across device voice recreation
+
+Keep recording ownership and cumulative length in backend state. Device
+removal flushes the header, replacement voices continue at EOF, and backend
+shutdown closes the file. A new backend still creates a fresh recording.
+Bound RIFF lengths and latch write/flush errors without crediting lost bytes.
+
+--- a/audio/wavaudio.c
++++ b/audio/wavaudio.c
+@@ -29,25 +29,40 @@
+ #define AUDIO_CAP "wav"
+ #include "audio_int.h"
+ 
++typedef struct WAVState {
++    Audiodev *dev;
++    FILE *f;
++    uint64_t total_bytes;
++    bool failed;
++} WAVState;
++
+ typedef struct WAVVoiceOut {
+     HWVoiceOut hw;
+-    FILE *f;
++    WAVState *state;
+     RateCtl rate;
+-    int total_samples;
+ } WAVVoiceOut;
+ 
+ static size_t wav_write_out(HWVoiceOut *hw, void *buf, size_t len)
+ {
+     WAVVoiceOut *wav = (WAVVoiceOut *) hw;
++    WAVState *state = wav->state;
++    if (state->failed) {
++        return 0;
++    }
+     int64_t bytes = audio_rate_get_bytes(&wav->rate, &hw->info, len);
+     assert(bytes % hw->info.bytes_per_frame == 0);
+ 
+-    if (bytes && fwrite(buf, bytes, 1, wav->f) != 1) {
++    /* RIFF's 32-bit length includes the 36 bytes preceding sample data. */
++    bytes = MIN(bytes, (UINT32_MAX - 36 - state->total_bytes));
++    bytes -= bytes % hw->info.bytes_per_frame;
++    if (bytes && (fwrite(buf, bytes, 1, state->f) != 1 || fflush(state->f))) {
+         dolog("wav_write_out: fwrite of %" PRId64 " bytes failed\nReason: %s\n",
+               bytes, strerror(errno));
++        state->failed = true;
++        return 0;
+     }
+ 
+-    wav->total_samples += bytes / hw->info.bytes_per_frame;
++    state->total_bytes += bytes;
+     return bytes;
+ }
+ 
+@@ -72,11 +87,18 @@
+         0x02, 0x00, 0x44, 0xac, 0x00, 0x00, 0x10, 0xb1, 0x02, 0x00, 0x04,
+         0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00
+     };
+-    Audiodev *dev = drv_opaque;
++    WAVState *state = drv_opaque;
++    Audiodev *dev = state->dev;
+     AudiodevWavOptions *wopts = &dev->u.wav;
+     struct audsettings wav_as = audiodev_to_audsettings(dev->u.wav.out);
+     const char *wav_path = wopts->path ?: "qemu.wav";
+ 
++    wav->state = state;
++    if (state->failed) {
++        dolog("WAV recording previously failed; refusing a replacement voice\n");
++        return -1;
++    }
++
+     stereo = wav_as.nchannels == 2;
+     switch (wav_as.fmt) {
+     case AUDIO_FORMAT_S8:
+@@ -113,16 +135,24 @@
+     le_store (hdr + 28, hw->info.freq << (bits16 + stereo), 4);
+     le_store (hdr + 32, 1 << (bits16 + stereo), 2);
+ 
+-    wav->f = fopen(wav_path, "wb");
+-    if (!wav->f) {
++    /* The backend owns the recording, not a hotpluggable device voice. */
++    if (state->f) {
++        audio_rate_start(&wav->rate);
++        return 0;
++    }
++    state->f = fopen(wav_path, "wb");
++    if (!state->f) {
+         dolog ("Failed to open wave file `%s'\nReason: %s\n",
+                wav_path, strerror(errno));
+         return -1;
+     }
+ 
+-    if (fwrite (hdr, sizeof (hdr), 1, wav->f) != 1) {
++    if (fwrite (hdr, sizeof (hdr), 1, state->f) != 1 || fflush(state->f)) {
+         dolog ("wav_init_out: failed to write header\nReason: %s\n",
+                strerror(errno));
++        fclose(state->f);
++        state->f = NULL;
++        state->failed = true;
+         return -1;
+     }
+ 
+@@ -133,45 +163,44 @@
+ static void wav_fini_out (HWVoiceOut *hw)
+ {
+     WAVVoiceOut *wav = (WAVVoiceOut *) hw;
++    WAVState *state = wav->state;
+     uint8_t rlen[4];
+     uint8_t dlen[4];
+-    uint32_t datalen = wav->total_samples * hw->info.bytes_per_frame;
++    uint32_t datalen = state->total_bytes;
+     uint32_t rifflen = datalen + 36;
+ 
+-    if (!wav->f) {
++    if (!state->f || state->failed) {
+         return;
+     }
+ 
+     le_store (rlen, rifflen, 4);
+     le_store (dlen, datalen, 4);
+ 
+-    if (fseek (wav->f, 4, SEEK_SET)) {
++    if (fseek (state->f, 4, SEEK_SET)) {
+         dolog ("wav_fini_out: fseek to rlen failed\nReason: %s\n",
+                strerror(errno));
+         goto doclose;
+     }
+-    if (fwrite (rlen, 4, 1, wav->f) != 1) {
++    if (fwrite (rlen, 4, 1, state->f) != 1) {
+         dolog ("wav_fini_out: failed to write rlen\nReason: %s\n",
+                strerror (errno));
+         goto doclose;
+     }
+-    if (fseek (wav->f, 32, SEEK_CUR)) {
++    if (fseek (state->f, 32, SEEK_CUR)) {
+         dolog ("wav_fini_out: fseek to dlen failed\nReason: %s\n",
+                strerror (errno));
+         goto doclose;
+     }
+-    if (fwrite (dlen, 4, 1, wav->f) != 1) {
++    if (fwrite (dlen, 4, 1, state->f) != 1) {
+         dolog ("wav_fini_out: failed to write dlen\nReaons: %s\n",
+                strerror (errno));
+         goto doclose;
+     }
+ 
+  doclose:
+-    if (fclose (wav->f))  {
+-        dolog ("wav_fini_out: fclose %p failed\nReason: %s\n",
+-               wav->f, strerror (errno));
++    if (fflush(state->f) || fseek(state->f, 0, SEEK_END)) {
++        dolog("wav_fini_out: flush/seek failed: %s\n", strerror(errno));
+     }
+-    wav->f = NULL;
+ }
+ 
+ static void wav_enable_out(HWVoiceOut *hw, bool enable)
+@@ -185,12 +214,19 @@
+ 
+ static void *wav_audio_init(Audiodev *dev, Error **errp)
+ {
++    WAVState *state = g_new0(WAVState, 1);
+     assert(dev->driver == AUDIODEV_DRIVER_WAV);
+-    return dev;
++    state->dev = dev;
++    return state;
+ }
+ 
+ static void wav_audio_fini (void *opaque)
+ {
++    WAVState *state = opaque;
++    if (state->f && fclose(state->f)) {
++        dolog("wav_audio_fini: close failed: %s\n", strerror(errno));
++    }
++    g_free(state);
+     ldebug ("wav_fini");
+ }
+ 

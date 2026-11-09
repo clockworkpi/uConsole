@@ -27,7 +27,7 @@ cat  linux-image-current-rockchip64/prerm > prerm
 dd if=/dev/zero bs=1MiB of=DevTerm_A06_v0.2h.img conv=notrunc oflag=append count=3000
 sudo losetup -f --show -P DevTerm_A06_v0.2h.img #assume got /dev/loop0
 sudo gparted /dev/loop0 #resize it,fullfill empty space with last partition by mouse drag
-sudo losetup -D /dev/loop0
+sudo losetup -d /dev/loop0
 ```
 
 ## Chroot
@@ -102,9 +102,9 @@ sudo umount /mnt/p1/sys
 ##clear bash 
 sudo rm -rf /mnt/p1/root/.bash_history
 sudo umount /mnt/p1
-sudo losetup -D /dev/loop0
+sudo losetup -d /dev/loop0
 ```
-All uconsole image can be found at : https://github.com/clockworkpi/uConsole/tree/master/images
+All uconsole image can be found at : https://github.com/clockworkpi/uConsole#uconsole-os-images
 
 That'it , happy hacking 
 

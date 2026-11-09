@@ -1,0 +1,20 @@
+Subject: [PATCH] usb/xhci: report each successful IOC in a chained transfer
+
+Do not suppress a final IOC after an intermediate successful IOC. Retain
+the existing short/error handling. Intel xHCI sections 4.10.1 and 4.11.7.
+
+--- a/hw/usb/hcd-xhci.c
++++ b/hw/usb/hcd-xhci.c
+@@ -1550,7 +1550,11 @@
+                 edtla = 0;
+             }
+             xhci_event(xhci, &event, TRB_INTR(*trb));
+-            reported = 1;
++            /* A successful intermediate IOC does not terminate event reporting:
++             * another IOC in the same chained transfer needs its own event.
++             * Keep the existing terminal-short suppression and error return.
++             */
++            reported = shortpkt;
+             if (xfer->status != CC_SUCCESS) {
+                 return;
+             }
